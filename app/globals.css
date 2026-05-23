@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+:root {
+  --background: #0a0a0a;
+  --foreground: #ededed;
+  --bpm: 120;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+}
+
+* {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+html {
+  /* Phone-Default: normales 16px-Root. Sorgt dafuer, dass das Phone-UI
+   * (max-w-md = 28rem = 448px) breiter als der Phone-Viewport ist und keine
+   * schwarzen Balken entstehen. */
+  font-size: 16px;
+}
+
+@media (min-width: 600px) {
+  html {
+    /* Tablet/Desktop: UI skaliert als Einheit mit dem Viewport.
+     * 1rem = 16px bei vmin 768 (iPad landscape, Phase-1-Baseline).
+     * Decke 17px verhindert Aufblaehen auf Desktop-Fenstern; Boden 13px
+     * fuer kleine Tablet-Browser. */
+    font-size: clamp(13px, calc(100vmin / 48), 17px);
+  }
+}
+
+html, body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans), system-ui, sans-serif;
+  overscroll-behavior: none;
+  touch-action: manipulation;
+}
+
+button, [role="button"], a {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+@keyframes bpm-pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.08); opacity: 0.7; }
+}
+
+.bpm-pulse {
+  animation: bpm-pulse calc(60s / var(--bpm)) ease-in-out infinite;
+}
