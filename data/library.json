@@ -1,0 +1,261 @@
+{
+  "builtAt": null,
+  "tracks": [
+    {
+      "uri": "spotify:track:mock001",
+      "title": "Strobe",
+      "artist": "deadmau5",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/f7/24/19/f724197c-b6b7-b2ad-94a9-06b2f5f95455/617465226458.jpg/600x600bb.jpg",
+      "durationMs": 637000,
+      "spotifyGenres": [
+        "progressive house",
+        "electro house"
+      ],
+      "bpm": 128,
+      "moodTags": [
+        "peak",
+        "dancefloor",
+        "feelgood"
+      ],
+      "energyLevel": 7
+    },
+    {
+      "uri": "spotify:track:mock002",
+      "title": "One More Time",
+      "artist": "Daft Punk",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/fd/4a/77/fd4a77db-0ebc-d043-41a2-f32fa1bb0fb4/dj.qrikkdwj.jpg/600x600bb.jpg",
+      "durationMs": 320000,
+      "spotifyGenres": [
+        "french house",
+        "electro"
+      ],
+      "bpm": 123,
+      "moodTags": [
+        "feelgood",
+        "banger",
+        "dancefloor"
+      ],
+      "energyLevel": 8
+    },
+    {
+      "uri": "spotify:track:mock003",
+      "title": "Summer",
+      "artist": "Calvin Harris",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/da/50/cc/da50cc80-3515-a38d-369b-0d700ffd249d/886444820448.jpg/600x600bb.jpg",
+      "durationMs": 222000,
+      "spotifyGenres": [
+        "dance pop",
+        "electro house"
+      ],
+      "bpm": 128,
+      "moodTags": [
+        "feelgood",
+        "dancefloor"
+      ],
+      "energyLevel": 7
+    },
+    {
+      "uri": "spotify:track:mock004",
+      "title": "Still D.R.E.",
+      "artist": "Dr. Dre",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music118/v4/27/6b/4c/276b4c69-99cb-6209-2fd8-3edd17ccfd06/00602517641228.rgb.jpg/600x600bb.jpg",
+      "durationMs": 270000,
+      "spotifyGenres": [
+        "g funk",
+        "west coast rap",
+        "hip hop"
+      ],
+      "bpm": 93,
+      "moodTags": [
+        "banger"
+      ],
+      "energyLevel": 6
+    },
+    {
+      "uri": "spotify:track:mock005",
+      "title": "HUMBLE.",
+      "artist": "Kendrick Lamar",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music112/v4/ab/16/ef/ab16efe9-e7f1-66ec-021c-5592a23f0f9e/17UMGIM88793.rgb.jpg/600x600bb.jpg",
+      "durationMs": 177000,
+      "spotifyGenres": [
+        "conscious hip hop",
+        "rap"
+      ],
+      "bpm": 150,
+      "moodTags": [
+        "peak",
+        "banger"
+      ],
+      "energyLevel": 9
+    },
+    {
+      "uri": "spotify:track:mock006",
+      "title": "Bodak Yellow",
+      "artist": "Cardi B",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/ca/58/e5/ca58e5e3-acb7-8ca3-6af9-ad63af3b71f1/075679873675.jpg/600x600bb.jpg",
+      "durationMs": 223000,
+      "spotifyGenres": [
+        "rap",
+        "trap"
+      ],
+      "bpm": 125,
+      "moodTags": [
+        "peak",
+        "banger"
+      ],
+      "energyLevel": 8
+    },
+    {
+      "uri": "spotify:track:mock007",
+      "title": "Take On Me",
+      "artist": "a-ha",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music/c6/e1/c8/mzi.ixgzfcmc.jpg/600x600bb.jpg",
+      "durationMs": 226000,
+      "spotifyGenres": [
+        "new wave pop",
+        "synth pop"
+      ],
+      "bpm": 169,
+      "moodTags": [
+        "feelgood",
+        "banger"
+      ],
+      "energyLevel": 8
+    },
+    {
+      "uri": "spotify:track:mock008",
+      "title": "Billie Jean",
+      "artist": "Michael Jackson",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/32/4f/fd/324ffda2-9e51-8f6a-0c2d-c6fd2b41ac55/074643811224.jpg/600x600bb.jpg",
+      "durationMs": 294000,
+      "spotifyGenres": [
+        "pop",
+        "post-disco"
+      ],
+      "bpm": 117,
+      "moodTags": [
+        "feelgood",
+        "dancefloor"
+      ],
+      "energyLevel": 7
+    },
+    {
+      "uri": "spotify:track:mock009",
+      "title": "Do I Wanna Know",
+      "artist": "Arctic Monkeys",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music113/v4/cc/0f/2d/cc0f2d02-5ff1-10e7-eea2-76863a55dbad/887828031795.png/600x600bb.jpg",
+      "durationMs": 272000,
+      "spotifyGenres": [
+        "modern rock",
+        "garage rock"
+      ],
+      "bpm": 85,
+      "moodTags": [
+        "melancholic"
+      ],
+      "energyLevel": 5
+    },
+    {
+      "uri": "spotify:track:mock010",
+      "title": "The Less I Know The Better",
+      "artist": "Tame Impala",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/a0/9a/2c/a09a2ca3-a5a6-814b-0af7-640dc0aef0aa/091012682261.jpg/600x600bb.jpg",
+      "durationMs": 216000,
+      "spotifyGenres": [
+        "psychedelic pop",
+        "modern rock"
+      ],
+      "bpm": 117,
+      "moodTags": [
+        "feelgood",
+        "chill"
+      ],
+      "energyLevel": 5
+    },
+    {
+      "uri": "spotify:track:mock011",
+      "title": "Titi Me Pregunto",
+      "artist": "Bad Bunny",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music113/v4/b0/b9/7c/b0b97c63-14ff-8946-f34e-4239faecb1e0/820cc83e-1f8f-4738-8ee8-e1ebce5c123b.png/600x600bb.jpg",
+      "durationMs": 243000,
+      "spotifyGenres": [
+        "reggaeton",
+        "latin"
+      ],
+      "bpm": 107,
+      "moodTags": [
+        "dancefloor",
+        "peak"
+      ],
+      "energyLevel": 7
+    },
+    {
+      "uri": "spotify:track:mock012",
+      "title": "Hips Don't Lie",
+      "artist": "Shakira",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/0d/b5/8a/0db58a8b-7b17-dd53-3464-116a415d0f49/196872648836.jpg/600x600bb.jpg",
+      "durationMs": 218000,
+      "spotifyGenres": [
+        "latin pop",
+        "dance pop"
+      ],
+      "bpm": 100,
+      "moodTags": [
+        "feelgood",
+        "dancefloor"
+      ],
+      "energyLevel": 7
+    },
+    {
+      "uri": "spotify:track:mock013",
+      "title": "Don't Stop Me Now",
+      "artist": "Queen",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/4d/08/2a/4d082a9e-7898-1aa1-a02f-339810058d9e/14DMGIM05632.rgb.jpg/600x600bb.jpg",
+      "durationMs": 209000,
+      "spotifyGenres": [
+        "classic rock",
+        "glam rock"
+      ],
+      "bpm": 156,
+      "moodTags": [
+        "feelgood",
+        "banger"
+      ],
+      "energyLevel": 9
+    },
+    {
+      "uri": "spotify:track:mock014",
+      "title": "Don't Start Now",
+      "artist": "Dua Lipa",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/41/ee/66/41ee66fa-f8dd-7e82-155a-3a1b360dc562/190295322175.jpg/600x600bb.jpg",
+      "durationMs": 183000,
+      "spotifyGenres": [
+        "dance pop",
+        "nu-disco"
+      ],
+      "bpm": 124,
+      "moodTags": [
+        "dancefloor",
+        "peak"
+      ],
+      "energyLevel": 8
+    },
+    {
+      "uri": "spotify:track:mock015",
+      "title": "Blinding Lights",
+      "artist": "The Weeknd",
+      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/a6/6e/bf/a66ebf79-5008-8948-b352-a790fc87446b/19UM1IM04638.rgb.jpg/600x600bb.jpg",
+      "durationMs": 200000,
+      "spotifyGenres": [
+        "pop",
+        "synth pop"
+      ],
+      "bpm": 171,
+      "moodTags": [
+        "peak",
+        "banger"
+      ],
+      "energyLevel": 9
+    }
+  ]
+}

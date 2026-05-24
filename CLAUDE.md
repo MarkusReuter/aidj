@@ -6,7 +6,7 @@ Touch-only Tablet-App für Partys: Claude wählt Tracks vor, Crowd tippt auf iPa
 
 ## Heutiger Stand
 
-Phase 1 (Tablet-UI mit Mock-Daten) ist aktiv. Spotify-OAuth (Phase 3) und Claude-DJ-Brain (Phase 5) sind **noch nicht** verdrahtet. Keine `.env.local`, keine externen API-Calls, keine echten Tokens.
+Phase 1 (Tablet-UI), Phase 1a (Phone-UI + UA-Routing + DJ-Mode) und Phase 2 (Library-Editor + `build-library`-Skript) sind durch. `data/library.json` existiert als Mock-Library aus den 15 MOCK_TRACKS — der Editor unter `/admin` funktioniert ohne API-Keys gegen diese Demo-Library. Spotify-OAuth (Phase 3) und Claude-DJ-Brain (Phase 5) sind **noch nicht** verdrahtet. `.env.local` ist nicht angelegt; `build-library` läuft erst wenn Spotify-Credentials da sind.
 
 ## Liefer-Reihenfolge (wichtig)
 
@@ -37,20 +37,30 @@ Spotify-Refresh-Token wird in `~/.dj-app/token.json` mit `chmod 0600` gespeicher
 
 ```bash
 npm install
-npm run dev       # http://localhost:3000/tablet
-npm run build     # Produktion (vor der Party)
-npm start         # Produktions-Server, State persistiert über Lifetime des Prozesses
+npm run dev            # http://localhost:3000  (Root sniffed UA → /tablet oder /phone)
+npm run build          # Produktion (vor der Party)
+npm start              # Produktions-Server, State persistiert über Lifetime des Prozesses
+npm run build-library -- <playlist-uri> [<playlist-uri> ...]
+                       # Einmal pro Party: Library aus Spotify-Playlists bauen.
+                       # Braucht SPOTIFY_CLIENT_ID/SECRET in .env.local; GETSONGBPM_API_KEY optional.
 ```
 
 ## Codebase-Layout
 
 ```
-app/tablet/      Tablet-Frontend (das, was auf dem iPad läuft)
-app/api/         Server-Routen (Spotify-Proxy + SSE ab Phase 3/4)
-components/      NowPlayingBar, NextUpCandidates, MoodSection, PlaylistToggles, AntiButtons
-lib/             mock-data.ts heute → spotify.ts, dj-brain.ts, state.ts später
-data/            mock-covers.json heute → library.json nach Phase 2
-scripts/         Einmal-Tools (fetch-mock-covers.ts; später build-library.ts)
+app/             Root-Page (UA-Sniff → /tablet | /phone) + Layout
+  tablet/        Tablet-Frontend (das, was auf dem iPad läuft)
+  phone/         Phone-Frontend (Portrait, User-Mode + DJ-Mode-Hidden-Tap-Unlock)
+  admin/         Library-Editor am Mac (Mood-Tags + Energy taggen)
+  api/           Server-Routen (lan-url, library; Spotify-Proxy + SSE ab Phase 3/4)
+components/      NowPlayingBar, NextUpCandidates, MoodSection, PlaylistModal, AntiButtons, WifiQrCode
+  phone/         PhoneTopBar, NowPlayingCard, HeartbeatBadge, GuestQueueList, …
+lib/             mock-data.ts + mock-loop.ts (Tablet+Phone Shared-State, Demo-Loop)
+                 library-schema.ts (Zod, Client-Safe) + library.ts (fs-Wrapper, Server-Only)
+                 phone/ (guest-id, guest-name, dj-mode)
+                 → spotify.ts, dj-brain.ts, state.ts kommen in Phase 3-5
+data/            mock-covers.json, library.json (kuratierte Track-Library für DJ-Brain)
+scripts/         fetch-mock-covers.ts, build-library.ts
 public/          PWA-Manifest, Icons
 ```
 

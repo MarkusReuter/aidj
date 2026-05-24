@@ -6,7 +6,11 @@ Vollständige Architektur, Phasenplan und Begründungen siehe [PLAN.md](./PLAN.m
 
 ## Status
 
-Phase 1 (Tablet-UI-Demo mit Mock-Daten) ist im Aufbau. Spotify- und Claude-Integration kommen in späteren Phasen.
+- ✓ Phase 1: Tablet-UI mit Mock-Daten, vollständig durchklickbar.
+- ✓ Phase 1a: Phone-UI mit UA-Routing, Gast-Slot + Track-Suche, Hidden-DJ-Mode (10× Tap aufs Logo).
+- ✓ Phase 2: `data/library.json` + Editor unter `/admin` (Mood-Tags + Energy), `build-library`-Skript für Spotify+GetSongBPM-Ingest.
+- ↻ Phase 3: Spotify-OAuth + Queue-Control + SSE — noch offen.
+- ↻ Phase 5: Claude-DJ-Brain — noch offen.
 
 ## Stack
 
@@ -23,9 +27,19 @@ npm install
 npm run dev
 ```
 
-App öffnen unter [http://localhost:3000/tablet](http://localhost:3000/tablet).
+App öffnen unter [http://localhost:3000/](http://localhost:3000/) — UA-Sniff routet Desktop/Tablet auf `/tablet`, Phone auf `/phone`.
 
-Aufs iPad (gleiches WLAN): `http://<mac-lan-ip>:3000/tablet` → "Zum Home-Bildschirm hinzufügen" für Fullscreen-PWA.
+Aufs iPad (gleiches WLAN): `http://<mac-lan-ip>:3000/` → "Zum Home-Bildschirm hinzufügen" für Fullscreen-PWA.
+
+Library-Editor am Mac: [http://localhost:3000/admin](http://localhost:3000/admin) — Mood-Tags und Energy pro Track setzen, speichert direkt in `data/library.json`.
+
+Library aus echten Spotify-Playlists bauen (braucht `.env.local` mit `SPOTIFY_CLIENT_ID`/`SECRET`, optional `GETSONGBPM_API_KEY`):
+
+```bash
+npm run build-library -- spotify:playlist:abc123 spotify:playlist:def456
+```
+
+Vorhandene Mood-Tags + Energy bleiben pro Track-URI beim Re-Build erhalten.
 
 ## Environment
 
@@ -44,11 +58,16 @@ Spotify-Account, mit dem sich die App authentifiziert, **muss Premium** sein —
 
 ```
 app/             Next.js App Router (UI + API Routes)
-  tablet/        Tablet-Frontend (touch-only)
-components/      React-Komponenten (NowPlayingBar, NextUpCandidates, …)
-lib/             Mock-Daten heute, Spotify/DJ-Brain später
-data/            Statische Library + Mock-Covers
-scripts/         Einmal-Tools (Cover-Fetch, später Library-Builder)
+  tablet/        Tablet-Frontend (touch-only, Landscape)
+  phone/         Phone-Frontend (Portrait, Gast + Hidden-DJ-Mode)
+  admin/         Library-Editor am Mac
+  api/           lan-url, library; Spotify/SSE-Routen folgen ab Phase 3/4
+components/      Geteilte Touch-Komponenten + phone/-Untermodule
+lib/             mock-data, mock-loop, library-schema (Zod), library (fs),
+                 phone/ (guest-id, guest-name, dj-mode);
+                 Spotify-/DJ-Brain-Module folgen ab Phase 3/5
+data/            mock-covers.json, library.json (kuratierte Track-Library)
+scripts/         fetch-mock-covers.ts, build-library.ts
 public/          PWA-Manifest, Icons
 PLAN.md          Vollständiger Implementationsplan
 AGENTS.md        Hinweise für AI-Coding-Agents (Next.js-Version-Warnung)
