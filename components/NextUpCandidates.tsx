@@ -28,7 +28,7 @@ export default function NextUpCandidates({
         </p>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-4 gap-3">
+      <div className="grid min-h-0 flex-1 grid-cols-4 gap-3 portrait:grid-cols-2">
         {candidates.map((track) => {
           const isCommitted = committedId === track.id;
           const isDimmed = committedId !== null && committedId !== track.id;
