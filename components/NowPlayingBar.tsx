@@ -23,7 +23,7 @@ export default function NowPlayingBar({ track, progressMs }: Props) {
   const progressPct = demoDurationMs > 0 ? (clampedProgress / demoDurationMs) * 100 : 0;
 
   return (
-    <section className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 p-4 select-none">
+    <section className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 p-2 select-none">
       {/* Blurred background cover */}
       <div className="pointer-events-none absolute inset-0 -z-0">
         <Image
@@ -36,34 +36,34 @@ export default function NowPlayingBar({ track, progressMs }: Props) {
         />
       </div>
 
-      <div className="relative z-10 flex items-center gap-6">
+      <div className="relative z-10 flex items-center gap-3">
         <Image
           src={track.coverUrl}
           alt={`${track.title} cover`}
           width={128}
           height={128}
           priority
-          className="h-32 w-32 flex-shrink-0 rounded-xl object-cover shadow-lg"
+          className="h-16 w-16 flex-shrink-0 rounded-lg object-cover shadow-lg"
         />
 
-        <div className="flex min-w-0 flex-1 flex-col gap-3">
-          <div className="flex items-baseline justify-between gap-4">
-            <h2 className="min-w-0 flex-1 truncate text-2xl font-bold text-zinc-50">
+        <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+          <div className="flex items-baseline justify-between gap-3">
+            <h2 className="min-w-0 flex-1 truncate text-base font-bold text-zinc-50">
               <span className="text-zinc-50">{track.title}</span>
               <span className="mx-2 text-zinc-600">&mdash;</span>
               <span className="text-zinc-400">{track.artist}</span>
             </h2>
-            <span className="flex-shrink-0 rounded-full bg-zinc-800/80 px-3 py-1 text-sm font-mono font-semibold text-zinc-200">
+            <span className="flex-shrink-0 rounded-full bg-zinc-800/80 px-2 py-0.5 text-xs font-mono font-semibold text-zinc-200">
               {track.genre}
             </span>
           </div>
 
-          <div className="flex items-center gap-3">
-            <span className="font-mono text-sm text-zinc-400 tabular-nums">
+          <div className="flex items-center gap-2">
+            <span className="font-mono text-xs text-zinc-400 tabular-nums">
               {formatTime(clampedProgress)}
             </span>
             <div
-              className="relative h-3 flex-1 overflow-hidden rounded-full bg-zinc-800"
+              className="relative h-2 flex-1 overflow-hidden rounded-full bg-zinc-800"
               role="progressbar"
               aria-valuemin={0}
               aria-valuemax={100}
@@ -74,7 +74,7 @@ export default function NowPlayingBar({ track, progressMs }: Props) {
                 style={{ width: `${progressPct}%` }}
               />
             </div>
-            <span className="font-mono text-sm text-zinc-400 tabular-nums">
+            <span className="font-mono text-xs text-zinc-400 tabular-nums">
               {formatTime(demoDurationMs)}
             </span>
           </div>

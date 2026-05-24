@@ -8,6 +8,7 @@ type LanUrlResponse = { origin: string | null };
 export default function WifiQrCode() {
   const [url, setUrl] = useState<string | null>(null);
   const [pngDataUrl, setPngDataUrl] = useState<string | null>(null);
+  const [enlarged, setEnlarged] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -56,30 +57,63 @@ export default function WifiQrCode() {
   const displayUrl = url ? url.replace(/^https?:\/\//, '') : '';
 
   return (
-    <aside
-      aria-label="QR-Code zum Beitreten"
-      className="flex h-full w-40 flex-none flex-col items-center justify-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/80 p-3 select-none"
-    >
-      <div className="flex h-28 w-28 items-center justify-center rounded-lg bg-white p-1">
-        {pngDataUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={pngDataUrl}
-            alt={url ? `QR-Code: ${url}` : 'QR-Code'}
-            className="h-full w-full"
-          />
-        ) : (
-          <div className="h-full w-full animate-pulse rounded bg-zinc-200" />
-        )}
-      </div>
-      <div className="flex w-full flex-col items-center gap-0.5">
-        <span className="text-[10px] uppercase tracking-wider text-zinc-500">
-          Mitmachen
-        </span>
-        <span className="w-full truncate text-center font-mono text-xs text-zinc-300">
-          {displayUrl || ' '}
-        </span>
-      </div>
-    </aside>
+    <>
+      <aside
+        aria-label="QR-Code zum Beitreten"
+        className="flex h-full w-auto flex-none items-center gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/80 px-2 py-1 select-none"
+      >
+        <button
+          type="button"
+          onClick={() => pngDataUrl && setEnlarged(true)}
+          aria-label="QR-Code vergroessern"
+          className="flex h-16 w-16 items-center justify-center rounded bg-white p-0.5"
+        >
+          {pngDataUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={pngDataUrl}
+              alt={url ? `QR-Code: ${url}` : 'QR-Code'}
+              className="h-full w-full"
+            />
+          ) : (
+            <div className="h-full w-full animate-pulse rounded bg-zinc-200" />
+          )}
+        </button>
+        <div className="flex max-w-[7rem] flex-col items-start gap-0.5">
+          <span className="text-[10px] uppercase tracking-wider text-zinc-500">
+            Mitmachen
+          </span>
+          <span className="w-full truncate font-mono text-[10px] text-zinc-300">
+            {displayUrl || ' '}
+          </span>
+        </div>
+      </aside>
+
+      {enlarged && pngDataUrl && (
+        <div
+          role="dialog"
+          aria-label="QR-Code vergroessert"
+          onClick={() => setEnlarged(false)}
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 bg-black/40 p-8 backdrop-blur-sm select-none"
+        >
+          <div className="rounded-2xl bg-white p-6">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src={pngDataUrl}
+              alt={url ? `QR-Code: ${url}` : 'QR-Code'}
+              className="h-[70vmin] w-[70vmin] max-h-[640px] max-w-[640px]"
+            />
+          </div>
+          {displayUrl && (
+            <span className="font-mono text-2xl text-zinc-200">
+              {displayUrl}
+            </span>
+          )}
+          <span className="text-sm uppercase tracking-wider text-zinc-400">
+            Tippen zum Schliessen
+          </span>
+        </div>
+      )}
+    </>
   );
 }

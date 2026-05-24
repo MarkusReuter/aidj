@@ -4,39 +4,65 @@ type Props = {
   onSkip: () => void;
   onDislike: () => void;
   onLove: () => void;
+  onOpenPlaylists: () => void;
+  activePlaylistCount: number;
   toast: string | null;
 };
 
-export default function AntiButtons({ onSkip, onDislike, onLove, toast }: Props) {
+const BUTTON_BASE =
+  'flex h-full min-h-[4rem] md:min-h-[5rem] flex-1 cursor-pointer items-center justify-center gap-2 md:gap-3 rounded-2xl bg-zinc-800 px-3 md:px-4 text-base md:text-lg font-semibold text-zinc-100 transition-all duration-300 ease-out active:scale-95';
+
+export default function AntiButtons({
+  onSkip,
+  onDislike,
+  onLove,
+  onOpenPlaylists,
+  activePlaylistCount,
+  toast,
+}: Props) {
   return (
     <>
-      <div className="flex min-h-0 flex-1 gap-3 select-none">
+      <div className="grid grid-cols-2 gap-3 select-none md:flex md:flex-none">
         <button
           type="button"
           onClick={onSkip}
           style={{ touchAction: 'manipulation' }}
-          className="flex h-full min-h-[4rem] md:min-h-[7.5rem] flex-1 cursor-pointer items-center justify-center gap-2 md:gap-4 rounded-2xl bg-zinc-800 px-3 md:px-6 text-base md:text-3xl font-semibold text-zinc-100 transition-all duration-300 ease-out hover:bg-red-900 hover:shadow-[0_0_18px_rgba(220,38,38,0.4)] active:scale-95"
+          className={`${BUTTON_BASE} hover:bg-red-900 hover:shadow-[0_0_18px_rgba(220,38,38,0.4)]`}
         >
-          <span aria-hidden className="text-2xl md:text-5xl">&#9197;</span>
+          <span aria-hidden className="text-2xl md:text-3xl">&#9197;</span>
           Skip Jetzt
         </button>
         <button
           type="button"
           onClick={onDislike}
           style={{ touchAction: 'manipulation' }}
-          className="flex h-full min-h-[4rem] md:min-h-[7.5rem] flex-1 cursor-pointer items-center justify-center gap-2 md:gap-4 rounded-2xl bg-zinc-800 px-3 md:px-6 text-base md:text-3xl font-semibold text-zinc-100 transition-all duration-300 ease-out hover:bg-yellow-900 hover:shadow-[0_0_18px_rgba(202,138,4,0.4)] active:scale-95"
+          className={`${BUTTON_BASE} hover:bg-yellow-900 hover:shadow-[0_0_18px_rgba(202,138,4,0.4)]`}
         >
-          <span aria-hidden className="text-2xl md:text-5xl">&#128078;</span>
+          <span aria-hidden className="text-2xl md:text-3xl">&#128078;</span>
           Nicht das
         </button>
         <button
           type="button"
           onClick={onLove}
           style={{ touchAction: 'manipulation' }}
-          className="flex h-full min-h-[4rem] md:min-h-[7.5rem] flex-1 cursor-pointer items-center justify-center gap-2 md:gap-4 rounded-2xl bg-zinc-800 px-3 md:px-6 text-base md:text-3xl font-semibold text-zinc-100 transition-all duration-300 ease-out hover:bg-pink-900 hover:shadow-[0_0_18px_rgba(219,39,119,0.4)] active:scale-95"
+          className={`${BUTTON_BASE} hover:bg-pink-900 hover:shadow-[0_0_18px_rgba(219,39,119,0.4)]`}
         >
-          <span aria-hidden className="text-2xl md:text-5xl">&#10084;&#65039;</span>
+          <span aria-hidden className="text-2xl md:text-3xl">&#10084;&#65039;</span>
           Mehr davon
+        </button>
+        <button
+          type="button"
+          onClick={onOpenPlaylists}
+          style={{ touchAction: 'manipulation' }}
+          className={`${BUTTON_BASE} relative hover:bg-purple-900 hover:shadow-[0_0_18px_rgba(168,85,247,0.45)]`}
+        >
+          <span aria-hidden className="text-2xl md:text-3xl">&#127911;</span>
+          Playlists
+          {activePlaylistCount > 0 && (
+            <span className="absolute top-2 right-2 rounded-full bg-purple-500 px-2 py-0.5 text-xs font-bold text-white">
+              {activePlaylistCount}
+            </span>
+          )}
         </button>
       </div>
 

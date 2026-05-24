@@ -1,12 +1,12 @@
 'use client';
 
-import type { CSSProperties } from 'react';
+import { useState, type CSSProperties } from 'react';
 import { MOCK_PLAYLISTS } from '@/lib/mock-data';
 import { useMockLoop } from '@/lib/mock-loop';
 import NowPlayingBar from '@/components/NowPlayingBar';
 import NextUpCandidates from '@/components/NextUpCandidates';
 import MoodSection from '@/components/MoodSection';
-import PlaylistToggles from '@/components/PlaylistToggles';
+import PlaylistModal from '@/components/PlaylistModal';
 import AntiButtons from '@/components/AntiButtons';
 import WifiQrCode from '@/components/WifiQrCode';
 import {
@@ -35,6 +35,8 @@ export default function TabletPage() {
     onLove,
   } = useMockLoop();
 
+  const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
+
   useFullscreenOnTap();
   useScreenWakeLock();
 
@@ -55,45 +57,50 @@ export default function TabletPage() {
   };
 
   return (
-    <main
-      style={bpmStyle}
-      className="flex h-dvh flex-col gap-2 overflow-hidden bg-black text-zinc-100 font-sans"
-    >
-      <div className="flex flex-none items-stretch gap-2">
-        <div className="min-w-0 flex-1">
-          <NowPlayingBar track={currentTrack} progressMs={progressMs} />
+    <>
+      <main
+        style={bpmStyle}
+        className="flex h-dvh flex-col gap-2 overflow-hidden bg-black text-zinc-100 font-sans"
+      >
+        <div className="flex flex-none items-stretch gap-2">
+          <div className="min-w-0 flex-1">
+            <NowPlayingBar track={currentTrack} progressMs={progressMs} />
+          </div>
+          <WifiQrCode />
         </div>
-        <WifiQrCode />
-      </div>
 
-      <NextUpCandidates
-        candidates={candidates}
-        committedId={committedId}
-        autoPickInSec={autoPickInSec}
-        onTap={onCandidateTap}
-      />
-
-      <div className="flex h-[42%] flex-none flex-col gap-2">
-        <MoodSection
-          question={currentQuestion}
-          counts={moodCounts}
-          onPress={onMoodPress}
+        <NextUpCandidates
+          candidates={candidates}
+          committedId={committedId}
+          autoPickInSec={autoPickInSec}
+          onTap={onCandidateTap}
         />
 
-        <section className="flex min-h-0 flex-1 flex-col gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4">
-          <PlaylistToggles
-            playlists={MOCK_PLAYLISTS}
-            active={activePlaylists}
-            onToggle={onPlaylistToggle}
+        <div className="flex flex-none flex-col gap-2">
+          <MoodSection
+            question={currentQuestion}
+            counts={moodCounts}
+            onPress={onMoodPress}
           />
+
           <AntiButtons
             onSkip={onSkip}
             onDislike={onDislike}
             onLove={onLove}
+            onOpenPlaylists={() => setPlaylistModalOpen(true)}
+            activePlaylistCount={activePlaylists.size}
             toast={toast}
           />
-        </section>
-      </div>
-    </main>
+        </div>
+      </main>
+
+      <PlaylistModal
+        playlists={MOCK_PLAYLISTS}
+        active={activePlaylists}
+        onToggle={onPlaylistToggle}
+        open={playlistModalOpen}
+        onClose={() => setPlaylistModalOpen(false)}
+      />
+    </>
   );
 }

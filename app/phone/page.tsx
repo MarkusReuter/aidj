@@ -20,7 +20,7 @@ import GuestQueueList, {
   type GuestQueueEntry,
 } from '@/components/phone/GuestQueueList';
 import MoodSection from '@/components/MoodSection';
-import PlaylistToggles from '@/components/PlaylistToggles';
+import PlaylistModal from '@/components/PlaylistModal';
 import AntiButtons from '@/components/AntiButtons';
 
 type CSSVarStyle = CSSProperties & Record<'--bpm', string>;
@@ -102,6 +102,7 @@ export default function PhonePage() {
   } = useGuestName(guestId);
   const [guestSubmission, setGuestSubmission] =
     useState<GuestQueueEntry | null>(null);
+  const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
 
   const queueEntries = useMemo<GuestQueueEntry[]>(() => {
     if (!guestSubmission) return SEED_QUEUE;
@@ -165,6 +166,7 @@ export default function PhonePage() {
   };
 
   return (
+    <>
     <main
       style={bpmStyle}
       className="mx-auto flex min-h-dvh max-w-md flex-col gap-3 bg-black text-zinc-100 font-sans"
@@ -215,21 +217,24 @@ export default function PhonePage() {
             counts={moodCounts}
             onPress={onMoodPress}
           />
-          <section className="flex flex-col gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3">
-            <PlaylistToggles
-              playlists={MOCK_PLAYLISTS}
-              active={activePlaylists}
-              onToggle={onPlaylistToggle}
-            />
-            <AntiButtons
-              onSkip={onSkip}
-              onDislike={onDislike}
-              onLove={onLove}
-              toast={toast}
-            />
-          </section>
+          <AntiButtons
+            onSkip={onSkip}
+            onDislike={onDislike}
+            onLove={onLove}
+            onOpenPlaylists={() => setPlaylistModalOpen(true)}
+            activePlaylistCount={activePlaylists.size}
+            toast={toast}
+          />
         </>
       )}
     </main>
+    <PlaylistModal
+      playlists={MOCK_PLAYLISTS}
+      active={activePlaylists}
+      onToggle={onPlaylistToggle}
+      open={playlistModalOpen}
+      onClose={() => setPlaylistModalOpen(false)}
+    />
+    </>
   );
 }
