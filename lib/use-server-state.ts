@@ -318,8 +318,19 @@ export function useServerState(
     void postJson('/api/state/button', { type: 'playlist', value });
   }, []);
 
-  const onSkip = useCallback(() => {
-    setToast('⏭ Skip kommt mit Phase 5');
+  const onSkip = useCallback(async () => {
+    setToast('⏭ Skip…');
+    try {
+      const res = await fetch('/api/state/skip', { method: 'POST' });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { message?: string };
+        setToast(`⚠ ${body.message ?? `HTTP ${res.status}`}`);
+        return;
+      }
+      setToast('⏭ Übersprungen');
+    } catch (err) {
+      setToast(`⚠ ${err instanceof Error ? err.message : 'Skip fehlgeschlagen'}`);
+    }
   }, []);
 
   const onDislike = useCallback(() => {

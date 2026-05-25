@@ -6,7 +6,7 @@ Touch-only Tablet-App für Partys: Claude wählt Tracks vor, Crowd tippt auf iPa
 
 ## Heutiger Stand
 
-Phase 1 (Tablet-UI), Phase 1a (Phone-UI + UA-Routing + DJ-Mode), Phase 2 (Library-Editor + `build-library`-Skript), Phase 3 (Spotify-OAuth + Proxy), Phase 4 (Server-State + SSE-Pipeline), Phase 4a (Gast-Queue-Server-State) und Phase 4b (In-App-Library-Build) sind durch. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync); Kandidaten kommen zufällig aus `data/library.json` als Stand-in für den DJ-Brain. Tablet-Tap committet direkt in die Spotify-Queue (`/api/queue/commit`, Host-Privileg); Phone-Tap geht durch die Gast-Queue (`/api/guest/submit`) mit FIFO + 1-Slot-Quota + Idempotenz. Track-Lifecycle (pending → playing → done) wird automatisch beim Spotify-Track-Wechsel gesetzt. `/admin` zeigt einen Spotify-Verbindungsstatus-Banner und einen Playlist-Picker, der die Library **additiv** (bestehende Tracks bleiben, neue werden angehängt) via SSE-Stream baut. Phase 5 (Claude-DJ-Brain + Lock-Window + echter Skip) ist **noch nicht** verdrahtet.
+Phasen 1, 1a, 2, 3, 3a, 4, 4a, 4b und 5 sind durch. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync); Kandidaten kommen vom DJ-Brain (`lib/dj-brain.ts`) — Claude via `@ai-sdk/anthropic` + `generateObject`, mit Heuristik-Fallback wenn `ANTHROPIC_API_KEY` fehlt (BPM-Match ±10, Tag-Overlap-Penalties aus 👎/❤️, History-Exclusion). Tablet-Tap committet direkt in die Spotify-Queue (`/api/queue/commit`, Host-Privileg); Phone-Tap geht durch die Gast-Queue (`/api/guest/submit`) mit FIFO + 1-Slot-Quota + Idempotenz. Track-Lifecycle (pending → playing → done) wird automatisch beim Spotify-Track-Wechsel gesetzt. Lock-Window pusht ~10 s vor Track-Ende den Auto-Pick (committed-Wahl oder Top-Kandidat) in die Spotify-Queue. Skip ist echt (`/api/state/skip` → `spotify.skipToNext()`). 👎/❤️ + Mood-Shift triggern Brain-Re-Rank. `/admin` zeigt einen Spotify-Verbindungsstatus-Banner und einen Playlist-Picker, der die Library **additiv** (bestehende Tracks bleiben, neue werden angehängt) via SSE-Stream baut. Phone-Suche trifft `/api/search` (Library + Spotify Web-Search gemerged, LRU-Cache 60s).
 
 **Spotify-Dev-Mode-Restrictions (2025/2026)**: Mehrere Endpoints geben für non-production-Apps 403 — `/v1/playlists/{id}/tracks` (deprecated, `/items` nutzen), `/v1/artists` (Bulk, kein Workaround außer Production-Mode). Details + Liste in PLAN.md Phase 4b → "Spotify-API-Realität". Beim Anfassen neuer Spotify-Endpoints **erst live proben**, bevor man Schemas hardcodet — und `127.0.0.1` statt `localhost` im Browser, sonst OAuth-Cookie-Mismatch.
 
@@ -77,7 +77,7 @@ lib/             mock-data.ts (15 Mock-Tracks + Mood-Fragen)
                  server-state-types.ts (SSE-Wire-Format, Client-Safe)
                  use-server-state.ts ('use client'-Hook auf EventSource, host|guest-Modi)
                  phone/ (guest-id, guest-name, dj-mode)
-                 → dj-brain.ts kommt in Phase 5
+                 dj-brain.ts (LLM-Kandidaten via @ai-sdk/anthropic + Heuristik-Fallback, Server-Only)
 data/            mock-covers.json, library.json (kuratierte Track-Library für DJ-Brain)
 scripts/         fetch-mock-covers.ts, build-library.ts (CLI-Fallback)
 public/          PWA-Manifest, Icons

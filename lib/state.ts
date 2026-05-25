@@ -32,14 +32,26 @@ import {
   getCurrentTrack,
   getDevices,
   isConnected as isSpotifyConnected,
+  skipToNext,
   SpotifyNotConnectedError,
   type NowPlaying,
 } from './spotify';
+import {
+  aggregateButtonLog,
+  proposeNextCandidates,
+  type ButtonLogEntry,
+} from './dj-brain';
 
 const POLL_INTERVAL_MS = 5_000;
 const CANDIDATE_COUNT = 4;
 const TRACKS_PER_MOOD_QUESTION = 4;
 const DEFAULT_BPM = 120;
+/** Wenn weniger Restzeit als das im aktuellen Track ist, pushen wir den Auto-Pick in die Spotify-Queue. */
+const LOCK_WINDOW_MS = 10_000;
+/** Maximale Anzahl Button-Events im Log (Recency-Weighting macht ältere irrelevant). */
+const BUTTON_LOG_MAX = 200;
+/** History-Größe für DJ-Brain (letzte gespielte Tracks). */
+const HISTORY_MAX = 10;
 
 type InternalState = {
   spotifyConnected: boolean;
@@ -49,13 +61,25 @@ type InternalState = {
   /** Zeitstempel des letzten Polls, zum Interpolieren der Progress-Bar. */
   pollAt: number;
   candidates: SnapshotTrack[];
+  /** Brain-Reasoning pro Candidate (für /history-View; nicht in den Snapshot). */
+  candidateReasonings: Record<string, string>;
   committedId: string | null;
+  /** URI, die im Lock-Window an Spotify gequeued wurde. Verhindert Doppel-Push. */
+  lockedTrackUri: string | null;
   moodCounts: Record<string, number>;
   moodQuestionIdx: number;
   tracksUntilMoodSwitch: number;
+  /** Vom DJ-Brain dynamisch erzeugte Frage, die `moodQuestionIdx` überschreibt. */
+  customMoodQuestion: MoodQuestion | null;
   activePlaylists: Set<string>;
   /** URI des zuletzt gesehenen Tracks — Edge-Detect für Track-Wechsel. */
   lastTrackUri: string | null;
+  /** Letzte HISTORY_MAX URIs (neueste zuletzt). */
+  history: string[];
+  /** Wall-clock-Zeit des ersten Tracks der Session (für LLM-Energie-Curve-Hint). */
+  partyStartedAt: number;
+  /** Rolling Log der Button-Klicks für recency-weighted Aggregation. */
+  buttonLog: ButtonLogEntry[];
 };
 
 const state: InternalState = {
@@ -65,12 +89,18 @@ const state: InternalState = {
   nowPlaying: null,
   pollAt: Date.now(),
   candidates: [],
+  candidateReasonings: {},
   committedId: null,
+  lockedTrackUri: null,
   moodCounts: {},
   moodQuestionIdx: 0,
   tracksUntilMoodSwitch: TRACKS_PER_MOOD_QUESTION,
+  customMoodQuestion: null,
   activePlaylists: new Set<string>(),
   lastTrackUri: null,
+  history: [],
+  partyStartedAt: Date.now(),
+  buttonLog: [],
 };
 
 const emitter = new EventEmitter();
@@ -129,33 +159,63 @@ export function invalidateLibraryCache(): void {
 }
 
 /**
- * Wählt CANDIDATE_COUNT Tracks aus der Library, exkl. der aktuell spielende.
- * Phase 4 stand-in für den DJ-Brain — pure Random-Auswahl, kein BPM-/Mood-
- * Matching. Wird in Phase 5 durch `proposeNextCandidates()` ersetzt.
+ * Holt sich neue Kandidaten vom DJ-Brain (Phase 5). Brain entscheidet intern,
+ * ob LLM oder Heuristik — beide Pfade liefern dieselbe Output-Form. Updated
+ * auch ggf. die Mood-Frage (LLM kann `shouldRefreshMoodQuestion` setzen).
+ *
+ * Niemals throwen: bei totalen Brain-Ausfall (sollte mit dem internen
+ * Fallback nie passieren) leeres Candidate-Array statt Crash.
  */
-function pickCandidatesFromLibrary(
+async function pickCandidatesViaBrain(
   library: LibraryTrack[],
-  excludeUri: string | null,
-  count: number,
-): SnapshotTrack[] {
-  const pool = library.filter((t) => t.uri !== excludeUri);
-  if (pool.length === 0) return [];
-  const shuffled = [...pool];
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    const a = shuffled[i];
-    const b = shuffled[j];
-    if (a && b) {
-      shuffled[i] = b;
-      shuffled[j] = a;
+  currentUri: string | null,
+): Promise<{ candidates: SnapshotTrack[]; reasonings: Record<string, string> }> {
+  try {
+    const result = await proposeNextCandidates(
+      {
+        library,
+        currentTrackUri: currentUri,
+        history: state.history.slice(-HISTORY_MAX),
+        activePlaylists: [...state.activePlaylists],
+        currentMoodQuestion:
+          state.customMoodQuestion ?? currentMoodQuestion() ?? null,
+        moodCounts: state.moodCounts,
+        aggregated: aggregateButtonLog(state.buttonLog, Date.now()),
+        now: Date.now(),
+        partyStartedAt: state.partyStartedAt,
+      },
+      {
+        count: CANDIDATE_COUNT,
+        tracksSinceRefresh:
+          TRACKS_PER_MOOD_QUESTION - state.tracksUntilMoodSwitch,
+      },
+    );
+
+    // Brain hat eine neue Mood-Frage vorgeschlagen → übernehmen + Counts reset.
+    if (result.shouldRefreshMoodQuestion && result.newMoodQuestion) {
+      state.customMoodQuestion = result.newMoodQuestion;
+      state.moodCounts = {};
+      state.tracksUntilMoodSwitch = TRACKS_PER_MOOD_QUESTION;
     }
+
+    const candidates: SnapshotTrack[] = [];
+    const reasonings: Record<string, string> = {};
+    for (const c of result.candidates) {
+      const t = library.find((x) => x.uri === c.trackUri);
+      if (!t) continue;
+      const snapshot = libraryToSnapshotTrack(t);
+      candidates.push(snapshot);
+      reasonings[snapshot.id] = c.reasoning;
+    }
+    return { candidates, reasonings };
+  } catch (err) {
+    console.warn('[state] dj-brain crashed unexpectedly:', err);
+    return { candidates: [], reasonings: {} };
   }
-  return shuffled
-    .slice(0, Math.min(count, shuffled.length))
-    .map(libraryToSnapshotTrack);
 }
 
 function currentMoodQuestion(): MoodQuestion | undefined {
+  if (state.customMoodQuestion) return state.customMoodQuestion;
   if (MOCK_MOOD_QUESTIONS.length === 0) return undefined;
   return MOCK_MOOD_QUESTIONS[state.moodQuestionIdx % MOCK_MOOD_QUESTIONS.length];
 }
@@ -229,33 +289,71 @@ async function poll(): Promise<void> {
     state.deviceName = activeDevice?.name ?? null;
 
     const currentUri = np?.track.uri ?? null;
+
     if (currentUri !== state.lastTrackUri) {
-      // Track-Wechsel → Pipeline durchspülen.
-      // Gast-Queue-Lifecycle: alter Track ist (falls Gast-Wunsch) erledigt,
-      // neuer Track ist (falls Gast-Wunsch) jetzt spielend. markDone/Playing
-      // sind no-ops, wenn die URI kein Gast-Eintrag ist.
-      if (state.lastTrackUri) guestMarkDone(state.lastTrackUri);
+      // ── Track-Wechsel: Pipeline durchspülen. ───────────────────────────
+      // Wenn das der erste Track der Session ist, setzen wir die Party-Startzeit
+      // jetzt — server-boot war evtl. Stunden früher.
+      if (state.lastTrackUri === null && currentUri !== null) {
+        state.partyStartedAt = Date.now();
+      }
+      if (state.lastTrackUri) {
+        guestMarkDone(state.lastTrackUri);
+        // History tracking — den vorigen Track ans Ende der History hängen.
+        state.history.push(state.lastTrackUri);
+        if (state.history.length > HISTORY_MAX * 2) {
+          state.history = state.history.slice(-HISTORY_MAX);
+        }
+      }
       if (currentUri) guestMarkPlaying(currentUri);
 
-      const library = await getLibrary();
-      state.candidates = pickCandidatesFromLibrary(
-        library,
-        currentUri,
-        CANDIDATE_COUNT,
-      );
       state.committedId = null;
+      state.lockedTrackUri = null;
       state.lastTrackUri = currentUri;
       state.tracksUntilMoodSwitch -= 1;
-      if (state.tracksUntilMoodSwitch <= 0) {
+      // Statische Rotation greift nur, wenn der Brain keine eigene Frage gesetzt hat.
+      if (
+        state.tracksUntilMoodSwitch <= 0 &&
+        state.customMoodQuestion === null
+      ) {
         state.moodQuestionIdx += 1;
         state.moodCounts = {};
         state.tracksUntilMoodSwitch = TRACKS_PER_MOOD_QUESTION;
       }
+
+      // Brain anrufen — entscheidet selbst, ob LLM oder Heuristik.
+      const library = await getLibrary();
+      const picked = await pickCandidatesViaBrain(library, currentUri);
+      state.candidates = picked.candidates;
+      state.candidateReasonings = picked.reasonings;
+    }
+
+    // ── Lock-Window: ~10s vor Track-Ende den Auto-Pick in Spotify-Queue pushen.
+    // Verwendet die committed-Wahl (Tablet-Tap) wenn vorhanden, sonst Top-Brain-Pick.
+    if (
+      np &&
+      currentUri &&
+      state.lockedTrackUri === null &&
+      np.track.durationMs - np.progressMs <= LOCK_WINDOW_MS &&
+      np.track.durationMs - np.progressMs > 0
+    ) {
+      const pickUri =
+        state.committedId ?? state.candidates[0]?.id ?? null;
+      // Nicht Lock-Pushen wenn der Pick gerade selbst der laufende Track ist
+      // (paranoid; sollte nicht passieren, weil Kandidaten den laufenden ausschließen).
+      if (pickUri && pickUri !== currentUri) {
+        try {
+          await addToQueue(pickUri);
+          state.lockedTrackUri = pickUri;
+        } catch (err) {
+          // Häufigster Fehler: kein aktives Device → Lock einfach skippen.
+          console.warn('[state] lock-window addToQueue failed:', err);
+        }
+      }
     }
   } catch (err) {
     // Polling-Fehler nicht propagieren — Tablet bleibt am letzten Snapshot
-    // hängen statt der App-Lifecycle zu killen. In Production-Mode loggen
-    // wir es; für Phase 4 nur console.warn.
+    // hängen statt der App-Lifecycle zu killen.
     console.warn('[state] poll error:', err);
   }
   emit();
@@ -311,14 +409,58 @@ export function subscribe(handler: SnapshotHandler): {
 
 // Mutation-API für die /api/state/*-Routen.
 
+function logButton(entry: Omit<ButtonLogEntry, 'timestamp'>): void {
+  state.buttonLog.push({ ...entry, timestamp: Date.now() });
+  if (state.buttonLog.length > BUTTON_LOG_MAX) {
+    state.buttonLog = state.buttonLog.slice(-BUTTON_LOG_MAX);
+  }
+}
+
 export function recordMoodPress(value: string): void {
   state.moodCounts[value] = (state.moodCounts[value] ?? 0) + 1;
+  logButton({ type: 'mood', value });
+  // Massive Stimmungs-Shift: 5+ Klicks auf denselben Mood-Wert in den letzten
+  // 30 s → Brain neu fragen lassen (re-rank), damit die Kandidaten zur neuen
+  // Stimmung passen statt zur alten.
+  if (shouldTriggerReRank('mood', value)) {
+    void reRankAsync('mood-shift');
+  }
   emit();
+}
+
+function shouldTriggerReRank(type: 'mood' | 'anti', value: string): boolean {
+  const cutoff = Date.now() - 30_000;
+  const relevant = state.buttonLog.filter(
+    (e) => e.timestamp >= cutoff && e.type === type && e.value === value,
+  );
+  return relevant.length >= 5;
+}
+
+async function reRankAsync(reason: string): Promise<void> {
+  if (!state.lastTrackUri) return;
+  try {
+    const library = await getLibrary();
+    const picked = await pickCandidatesViaBrain(library, state.lastTrackUri);
+    state.candidates = picked.candidates;
+    state.candidateReasonings = picked.reasonings;
+    // Wenn die committed-Wahl nicht mehr in den neuen Kandidaten ist, freigeben.
+    if (
+      state.committedId &&
+      !picked.candidates.some((c) => c.id === state.committedId)
+    ) {
+      state.committedId = null;
+    }
+    emit();
+    console.log(`[state] re-ranked candidates (reason: ${reason})`);
+  } catch (err) {
+    console.warn('[state] re-rank failed:', err);
+  }
 }
 
 export function togglePlaylist(name: string): void {
   if (state.activePlaylists.has(name)) state.activePlaylists.delete(name);
   else state.activePlaylists.add(name);
+  logButton({ type: 'playlist', value: name });
   emit();
 }
 
@@ -388,16 +530,55 @@ export async function submitGuestTrack(input: {
 }
 
 /**
- * Anti-Buttons (👎 / ❤️) — Phase 5 wertet die Counts aus, Phase 4 zählt nur.
- * Für die UI gibt's keinen direkten State; das Toast bleibt clientseitig.
+ * Anti-Buttons (👎 / ❤️). Beide werden im Button-Log mit der aktuellen Track-URI
+ * verknüpft, damit der DJ-Brain Tag-Overlap-Penalties/-Boosts berechnen kann.
+ *
+ * `dislike` triggert sofort einen Re-Rank — der Crowd sagt aktiv "nicht das",
+ * also wollen wir die ähnlichen Tracks aus den aktuellen Kandidaten ranauswerfen.
  */
 const antiCounts = { dislike: 0, love: 0 };
 export function recordAntiPress(value: 'dislike' | 'love'): void {
   antiCounts[value] += 1;
-  // Kein emit — beeinflusst keinen sichtbaren State in Phase 4.
+  const trackUri = state.lastTrackUri ?? undefined;
+  logButton({ type: value, value, trackUri });
+  if (value === 'dislike') {
+    void reRankAsync('dislike');
+  }
+  emit();
 }
 export function getAntiCounts(): Readonly<typeof antiCounts> {
   return antiCounts;
+}
+
+/**
+ * Skip-Track: drückt Spotify-Next + räumt Gast-Queue auf + triggert
+ * Brain-Re-Rank für den Slot danach. Idempotent gegen Doppel-Skip — Spotify
+ * gibt einfach erneut "next" zurück, was im Worst-Case einen Track weiter
+ * vorne überspringt; wir akzeptieren das als Edge-Case.
+ */
+export type SkipResult =
+  | { ok: true }
+  | { ok: false; error: 'not_connected' | 'no_active_device' | 'spotify_error'; message: string };
+
+export async function skipCurrentTrack(): Promise<SkipResult> {
+  try {
+    await skipToNext(state.activeDeviceId ?? undefined);
+  } catch (err) {
+    if (err instanceof SpotifyNotConnectedError) {
+      return { ok: false, error: 'not_connected', message: err.message };
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('Kein aktives Spotify-Device')) {
+      return { ok: false, error: 'no_active_device', message: msg };
+    }
+    return { ok: false, error: 'spotify_error', message: msg };
+  }
+  // Gast-Queue-Lifecycle: der weggekippte Track ist (falls Gast) erledigt.
+  if (state.lastTrackUri) guestMarkDone(state.lastTrackUri);
+  // Pollen wird beim nächsten Tick den Track-Wechsel sehen + neue Kandidaten holen.
+  // Wir emitten direkt einmal, damit das UI sofort reagiert (z.B. Skip-Toast).
+  emit();
+  return { ok: true };
 }
 
 export function getSnapshot(): StateSnapshot {

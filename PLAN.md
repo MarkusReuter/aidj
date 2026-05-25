@@ -592,9 +592,11 @@ Future Considerations:
 
 ### Phase 5: DJ-Brain (Vercel AI SDK + Claude)
 
-**Setup, das jetzt fällig wird** (in Phase 0 bewusst ausgelassen):
-- Installieren: `ai`, `@ai-sdk/anthropic`.
-- `.env.local` ergänzen: `ANTHROPIC_API_KEY=…`.
+**Status: durch.** Brain ist implementiert in `lib/dj-brain.ts` und in `lib/state.ts` verdrahtet. Lock-Window, echter Skip, Re-Rank-Trigger auf 👎 + Mood-Shift, recency-weighted Button-Aggregation, dynamische Mood-Frage vom LLM — alles aktiv. Ohne `ANTHROPIC_API_KEY` läuft sauberer Heuristik-Fallback (BPM-Match ±10, Tag-Overlap-Penalties/-Boosts aus 👎/❤️, History-Exclusion, Random-Jitter), sodass die App auch in Dev/CI ohne LLM funktioniert.
+
+**Setup**:
+- Installiert: `ai`, `@ai-sdk/anthropic`.
+- `.env.local` ergänzen: `ANTHROPIC_API_KEY=…` (sobald verfügbar). Brain detected die Variable lazy bei jedem Call — kein Server-Restart nötig nach Eintragen.
 
 **`lib/dj-brain.ts`** — Kernlogik:
 
