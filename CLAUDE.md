@@ -6,7 +6,7 @@ Touch-only Tablet-App für Partys: Claude wählt Tracks vor, Crowd tippt auf iPa
 
 ## Heutiger Stand
 
-Phase 1 (Tablet-UI), Phase 1a (Phone-UI + UA-Routing + DJ-Mode), Phase 2 (Library-Editor + `build-library`-Skript), Phase 3 (Spotify-OAuth + Proxy) und Phase 4 (Server-State + SSE-Pipeline) sind durch. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync); Kandidaten kommen zufällig aus `data/library.json` als Stand-in für den DJ-Brain. Tap auf eine Kandidaten-Karte queued den Track tatsächlich in Spotify (`/api/queue/commit`). Phase 4a (Gast-Queue-Server-State) und Phase 5 (Claude-DJ-Brain + Lock-Window + echter Skip) sind **noch nicht** verdrahtet.
+Phase 1 (Tablet-UI), Phase 1a (Phone-UI + UA-Routing + DJ-Mode), Phase 2 (Library-Editor + `build-library`-Skript), Phase 3 (Spotify-OAuth + Proxy), Phase 4 (Server-State + SSE-Pipeline) und Phase 4a (Gast-Queue-Server-State) sind durch. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync); Kandidaten kommen zufällig aus `data/library.json` als Stand-in für den DJ-Brain. Tablet-Tap committet direkt in die Spotify-Queue (`/api/queue/commit`, Host-Privileg); Phone-Tap geht durch die Gast-Queue (`/api/guest/submit`) mit FIFO + 1-Slot-Quota + Idempotenz. Track-Lifecycle (pending → playing → done) wird automatisch beim Spotify-Track-Wechsel gesetzt. Phase 5 (Claude-DJ-Brain + Lock-Window + echter Skip) ist **noch nicht** verdrahtet.
 
 ## Liefer-Reihenfolge (wichtig)
 
@@ -57,15 +57,17 @@ app/             Root-Page (UA-Sniff → /tablet | /phone) + Layout
     library/     Library load/save
     spotify/     OAuth (auth, callback) + Proxy (devices, select-device, queue, now-playing)
     state/       stream (SSE) + button (mood/playlist/anti)
-    queue/       commit (Candidate-Tap → Spotify Queue + committedId)
+    queue/       commit (Tablet-Tap → Spotify Queue + committedId, Host-Privileg)
+    guest/       submit (Phone-Tap → FIFO-Gast-Queue mit 1-Slot-Quota)
 components/      NowPlayingBar, NextUpCandidates, MoodSection, PlaylistModal, AntiButtons, WifiQrCode
   phone/         PhoneTopBar, NowPlayingCard, HeartbeatBadge, GuestQueueList, …
 lib/             mock-data.ts (15 Mock-Tracks + Mood-Fragen)
                  library-schema.ts (Zod, Client-Safe) + library.ts (fs-Wrapper, Server-Only)
                  spotify.ts (Token-Storage in ~/.aidj-app/ + Wrapper, Server-Only)
                  state.ts (Party-State-Singleton + EventEmitter + 5s-Polling, Server-Only)
+                 guest-queue.ts (In-Memory-FIFO + Mutex + Quota, Server-Only)
                  server-state-types.ts (SSE-Wire-Format, Client-Safe)
-                 use-server-state.ts ('use client'-Hook auf EventSource)
+                 use-server-state.ts ('use client'-Hook auf EventSource, host|guest-Modi)
                  phone/ (guest-id, guest-name, dj-mode)
                  → dj-brain.ts kommt in Phase 5
 data/            mock-covers.json, library.json (kuratierte Track-Library für DJ-Brain)

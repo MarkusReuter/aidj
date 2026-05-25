@@ -25,27 +25,6 @@ import AntiButtons from '@/components/AntiButtons';
 
 type CSSVarStyle = CSSProperties & Record<'--bpm', string>;
 
-// Two seed entries so the queue isn't empty at first render (demo requirement
-// from PLAN.md Phase 1a).
-const SEED_QUEUE: GuestQueueEntry[] = [
-  {
-    id: 'seed-1',
-    title: 'Insomnia',
-    artist: 'Faithless',
-    coverUrl: MOCK_TRACKS[7]?.coverUrl ?? '',
-    guestLabel: 'Anna',
-    isMine: false,
-  },
-  {
-    id: 'seed-2',
-    title: 'Around the World',
-    artist: 'Daft Punk',
-    coverUrl: MOCK_TRACKS[1]?.coverUrl ?? '',
-    guestLabel: 'Tim',
-    isMine: false,
-  },
-];
-
 function trackToSearchResult(
   track: Track,
   source: 'playlist' | 'spotify',
@@ -59,8 +38,8 @@ function trackToSearchResult(
   };
 }
 
-// Mock search: substring-match across MOCK_TRACKS. First half is tagged as
-// playlist, second half as spotify, just so the source-pill visibly differs.
+// Mock-Such-Funktion: Substring-Match über MOCK_TRACKS. Wird in Phase 3a
+// durch `fetch('/api/search?q=…')` ersetzt — die Komponente bleibt gleich.
 async function mockSearch(query: string): Promise<SearchResult[]> {
   const q = query.toLowerCase();
   const matches = MOCK_TRACKS.filter(
@@ -74,6 +53,14 @@ async function mockSearch(query: string): Promise<SearchResult[]> {
 }
 
 export default function PhonePage() {
+  const guestId = useGuestId();
+  const {
+    name: guestName,
+    isCustom: guestNameIsCustom,
+    setName: setGuestName,
+    resetName: resetGuestName,
+  } = useGuestName(guestId);
+
   const {
     currentTrack,
     candidates,
@@ -85,69 +72,60 @@ export default function PhonePage() {
     autoPickInSec,
     toast,
     spotifyConnected,
+    guestQueue,
+    mySubmission,
     onCandidateTap,
     onMoodPress,
     onPlaylistToggle,
     onSkip,
     onDislike,
     onLove,
-  } = useServerState();
+    submitGuestTrack,
+  } = useServerState({
+    mode: 'guest',
+    guestId,
+    guestName: guestName ?? 'Gast',
+  });
 
   const { isDj, registerTap } = useDjMode();
-  const guestId = useGuestId();
-  const {
-    name: guestName,
-    isCustom: guestNameIsCustom,
-    setName: setGuestName,
-    resetName: resetGuestName,
-  } = useGuestName(guestId);
-  const [guestSubmission, setGuestSubmission] =
-    useState<GuestQueueEntry | null>(null);
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
 
+  // SnapshotGuestEntry → UI-Eintrags-Shape. `isMine` markiert den eigenen
+  // Eintrag visuell (ring) in der Liste.
   const queueEntries = useMemo<GuestQueueEntry[]>(() => {
-    if (!guestSubmission) return SEED_QUEUE;
-    return [...SEED_QUEUE, guestSubmission];
-  }, [guestSubmission]);
+    return guestQueue.map((e) => ({
+      id: e.submissionId,
+      title: e.trackMeta.title,
+      artist: e.trackMeta.artist,
+      coverUrl: e.trackMeta.coverUrl,
+      guestLabel: e.guestName,
+      isMine: e.guestId === guestId,
+    }));
+  }, [guestQueue, guestId]);
 
-  const slotStatus = guestSubmission
-    ? {
-        kind: 'queued' as const,
-        position: queueEntries.findIndex((e) => e.isMine) + 1,
-      }
-    : { kind: 'free' as const };
-
-  const handleCandidateTapWithQuota = useCallback(
-    (id: string) => {
-      if (guestSubmission) return;
-      const track = MOCK_TRACKS.find((t) => t.id === id);
-      if (!track) return;
-      onCandidateTap(id);
-      setGuestSubmission({
-        id: `guest-${guestId ?? 'anon'}-${id}`,
-        title: track.title,
-        artist: track.artist,
-        coverUrl: track.coverUrl,
-        guestLabel: guestName ?? 'du',
-        isMine: true,
-      });
-    },
-    [guestSubmission, guestId, guestName, onCandidateTap],
-  );
+  const slotStatus = useMemo(() => {
+    if (!mySubmission) return { kind: 'free' as const };
+    const position =
+      guestQueue
+        .filter((e) => e.status !== 'done')
+        .findIndex((e) => e.submissionId === mySubmission.submissionId) + 1;
+    return { kind: 'queued' as const, position: Math.max(1, position) };
+  }, [mySubmission, guestQueue]);
 
   const handleSearchPick = useCallback(
-    (result: SearchResult) => {
-      if (guestSubmission) return;
-      setGuestSubmission({
-        id: `guest-${guestId ?? 'anon'}-${result.id}`,
+    async (result: SearchResult) => {
+      if (mySubmission) return;
+      await submitGuestTrack(result.id, {
         title: result.title,
         artist: result.artist,
         coverUrl: result.coverUrl,
-        guestLabel: guestName ?? 'du',
-        isMine: true,
+        // SearchResult führt heute kein durationMs — bis Phase 3a fallback
+        // auf 0 (UI hat keine Anzeige darauf). Server validiert positive int,
+        // also nehmen wir 1ms als Platzhalter.
+        durationMs: 1,
       });
     },
-    [guestSubmission, guestId, guestName],
+    [mySubmission, submitGuestTrack],
   );
 
   if (!currentTrack || !currentQuestion) {
@@ -207,17 +185,15 @@ export default function PhonePage() {
         candidates={candidates}
         committedId={committedId}
         autoPickInSec={autoPickInSec}
-        onTap={handleCandidateTapWithQuota}
+        onTap={mySubmission ? () => {} : onCandidateTap}
       />
 
       <SearchAutocomplete
         searchFn={mockSearch}
         onPick={handleSearchPick}
-        disabled={Boolean(guestSubmission)}
+        disabled={Boolean(mySubmission)}
         disabledHint={
-          guestSubmission
-            ? 'Du hast schon einen Track in der Queue.'
-            : undefined
+          mySubmission ? 'Du hast schon einen Track in der Queue.' : undefined
         }
       />
 

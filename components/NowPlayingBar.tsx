@@ -29,6 +29,7 @@ export default function NowPlayingBar({ track, progressMs }: Props) {
           alt=""
           width={600}
           height={600}
+          priority
           aria-hidden
           className="h-full w-full scale-150 object-cover opacity-30 blur-3xl"
         />

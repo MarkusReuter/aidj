@@ -15,13 +15,24 @@
  */
 
 import { EventEmitter } from 'node:events';
+import {
+  enqueue as guestEnqueue,
+  listActive as listActiveGuests,
+  markDone as guestMarkDone,
+  markPlaying as guestMarkPlaying,
+  rollback as guestRollback,
+  type EnqueueResult,
+  type GuestEntry,
+} from './guest-queue';
 import { loadLibrary, type LibraryTrack } from './library';
 import { MOCK_MOOD_QUESTIONS, type MoodQuestion } from './mock-data';
 import type { SnapshotTrack, StateSnapshot } from './server-state-types';
 import {
+  addToQueue,
   getCurrentTrack,
   getDevices,
   isConnected as isSpotifyConnected,
+  SpotifyNotConnectedError,
   type NowPlaying,
 } from './spotify';
 
@@ -174,6 +185,15 @@ function buildSnapshot(): StateSnapshot {
     currentMoodQuestion: mq ?? null,
     moodCounts: { ...state.moodCounts },
     activePlaylists: [...state.activePlaylists],
+    guestQueue: listActiveGuests().map((e) => ({
+      guestId: e.guestId,
+      guestName: e.guestName,
+      trackUri: e.trackUri,
+      trackMeta: e.trackMeta,
+      submissionId: e.submissionId,
+      submittedAt: e.submittedAt,
+      status: e.status,
+    })),
   };
 }
 
@@ -211,6 +231,12 @@ async function poll(): Promise<void> {
     const currentUri = np?.track.uri ?? null;
     if (currentUri !== state.lastTrackUri) {
       // Track-Wechsel → Pipeline durchspülen.
+      // Gast-Queue-Lifecycle: alter Track ist (falls Gast-Wunsch) erledigt,
+      // neuer Track ist (falls Gast-Wunsch) jetzt spielend. markDone/Playing
+      // sind no-ops, wenn die URI kein Gast-Eintrag ist.
+      if (state.lastTrackUri) guestMarkDone(state.lastTrackUri);
+      if (currentUri) guestMarkPlaying(currentUri);
+
       const library = await getLibrary();
       state.candidates = pickCandidatesFromLibrary(
         library,
@@ -302,6 +328,63 @@ export function commitCandidate(trackId: string): boolean {
   state.committedId = trackId;
   emit();
   return true;
+}
+
+export type SubmitGuestResult =
+  | { ok: true; entry: GuestEntry; position: number; deduped: boolean }
+  | { ok: false; error: 'quota_exceeded'; current: GuestEntry }
+  | { ok: false; error: 'queue_full' }
+  | { ok: false; error: 'not_connected'; message: string }
+  | { ok: false; error: 'no_active_device'; message: string }
+  | { ok: false; error: 'spotify_error'; message: string };
+
+/**
+ * Submit eines Gast-Track-Wunschs. Geht durch:
+ *   1. Quota/Idempotency-Check in guest-queue.enqueue (mutex)
+ *   2. Spotify-addToQueue: lässt den Track ans Ende der Connect-Queue
+ *      hängen, sodass er nach allen schon gequeueten Tracks läuft.
+ *   3. Bei Spotify-Fehler → rollback aus der Gast-Queue, damit der Gast
+ *      direkt neu submitten kann (z.B. nachdem das Device aktiv wurde).
+ *
+ * Phase-4a-Vereinfachung: "Submit = sofort Spotify-Queue". Lock-Window
+ * vor Track-Ende kommt mit Phase 5 (DJ-Brain) — dann wandert der
+ * eigentliche Queue-Push dort hin und Phase 4a's Submit befüllt nur
+ * noch die Gast-Queue.
+ */
+export async function submitGuestTrack(input: {
+  guestId: string;
+  guestName: string;
+  trackUri: string;
+  trackMeta: GuestEntry['trackMeta'];
+  submissionId: string;
+}): Promise<SubmitGuestResult> {
+  const queued: EnqueueResult = await guestEnqueue(input);
+  if (!queued.ok) {
+    emit(); // Snapshot fürs UI ist trotzdem fresh.
+    return queued;
+  }
+  // Idempotency-Hit → Spotify-Call schon beim ersten Mal gelaufen,
+  // nicht doppelt feuern.
+  if (queued.deduped) {
+    emit();
+    return { ok: true, entry: queued.entry, position: queued.position, deduped: true };
+  }
+  try {
+    await addToQueue(input.trackUri);
+  } catch (err) {
+    await guestRollback(input.submissionId);
+    emit();
+    if (err instanceof SpotifyNotConnectedError) {
+      return { ok: false, error: 'not_connected', message: err.message };
+    }
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('Kein aktives Spotify-Device')) {
+      return { ok: false, error: 'no_active_device', message: msg };
+    }
+    return { ok: false, error: 'spotify_error', message: msg };
+  }
+  emit();
+  return { ok: true, entry: queued.entry, position: queued.position, deduped: false };
 }
 
 /**

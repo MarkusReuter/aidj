@@ -23,6 +23,21 @@ export type SnapshotMoodQuestion = {
   options: MoodOption[];
 };
 
+export type SnapshotGuestEntry = {
+  guestId: string;
+  guestName: string;
+  trackUri: string;
+  trackMeta: {
+    title: string;
+    artist: string;
+    coverUrl: string;
+    durationMs: number;
+  };
+  submissionId: string;
+  submittedAt: number;
+  status: 'pending' | 'playing' | 'done';
+};
+
 export type StateSnapshot = {
   /** Wall-clock-Zeit der Snapshot-Erstellung (ms). Client interpoliert progressMs darüber. */
   snapshotAt: number;
@@ -38,6 +53,8 @@ export type StateSnapshot = {
   currentMoodQuestion: SnapshotMoodQuestion | null;
   moodCounts: Record<string, number>;
   activePlaylists: string[];
+  /** Aktive Gast-Wünsche (pending + playing), in Submission-Reihenfolge. */
+  guestQueue: SnapshotGuestEntry[];
 };
 
 export type ButtonEvent =

@@ -15,8 +15,9 @@ Reifegrad: **Spotify end-to-end, DJ-Brain noch Random** — Tablet/Phone zeigen 
 - ✅ `build-library`-Skript (Spotify-Playlists → `data/library.json` + BPM via GetSongBPM)
 - ✅ Spotify-OAuth-Flow + API-Proxy (Queue, Now-Playing, Devices, Transfer-Playback)
 - ✅ SSE-Pipeline + Server-State (Multi-Client-Sync, Spotify-Polling, Mood/Playlist serverseitig)
+- ✅ Gast-Queue-Server-State (FIFO + 1-Slot-Quota + Idempotenz, Phone-Submission via `/api/guest/submit`)
 - 🔧 Claude-DJ-Brain (heute Random-Kandidaten aus Library statt LLM)
-- 🔧 Gast-Queue-Server-State (heute Phone-lokal)
+- 🔧 Gast-Queue-UI auf dem Tablet (heute nur über SSE-Snapshot sichtbar, kein Badge)
 - 🔧 Skip-Button + Lock-Window 10 s vor Track-Ende (kommt mit DJ-Brain)
 
 Vollständige Roadmap mit Begründungen in [PLAN.md](./PLAN.md).
@@ -222,13 +223,15 @@ app/             Next.js App Router (UI + API Routes)
     library/     Library load/save
     spotify/     OAuth + Proxy (auth, callback, devices, queue, now-playing)
     state/       SSE-Stream + Button-Mutations
-    queue/       Candidate-Commit (→ Spotify Queue)
+    queue/       Candidate-Commit (→ Spotify Queue, Host-Privileg)
+    guest/       Phone-Submit (FIFO-Queue + 1-Slot-Quota pro Gast)
 components/      Geteilte Touch-Komponenten + phone/-Untermodule
 lib/             mock-data, library-schema/library (fs),
                  spotify.ts (Token-Storage + Wrapper),
                  state.ts (Server-State-Singleton + EventEmitter),
                  server-state-types.ts (Wire-Format, client-safe),
                  use-server-state.ts (Client-Hook auf EventSource),
+                 guest-queue.ts (FIFO + Mutex + Quota für Phone-Submissions),
                  phone/ (guest-id, guest-name, dj-mode)
 data/            mock-covers.json, library.json
 scripts/         fetch-mock-covers.ts, build-library.ts
