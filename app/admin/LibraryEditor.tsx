@@ -31,11 +31,18 @@ function tracksEqual(a: LibraryTrack[], b: LibraryTrack[]): boolean {
 
 export default function LibraryEditor({ initialLibrary }: Props) {
   const [tracks, setTracks] = useState<LibraryTrack[]>(initialLibrary.tracks);
+  // Baseline = letzter persistierter Stand. Nach erfolgreichem Save auf den
+  // gerade gespeicherten Stand gesetzt, sonst kippt isDirty nie zurück (die
+  // Server-Component remountet nur bei builtAt-Wechsel, und ein PUT ändert
+  // builtAt nicht).
+  const [baseline, setBaseline] = useState<LibraryTrack[]>(
+    initialLibrary.tracks,
+  );
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
 
   const isDirty = useMemo(
-    () => !tracksEqual(tracks, initialLibrary.tracks),
-    [tracks, initialLibrary.tracks],
+    () => !tracksEqual(tracks, baseline),
+    [tracks, baseline],
   );
 
   const updateTrack = useCallback(
@@ -65,13 +72,30 @@ export default function LibraryEditor({ initialLibrary }: Props) {
     [],
   );
 
+  const removeTrack = useCallback((uri: string) => {
+    setTracks((prev) => prev.filter((t) => t.uri !== uri));
+  }, []);
+
+  const clearAll = useCallback(() => {
+    if (tracks.length === 0) return;
+    const ok = window.confirm(
+      `Wirklich alle ${tracks.length} Tracks aus der Library entfernen? Wird erst beim "Speichern" persistiert.`,
+    );
+    if (!ok) return;
+    setTracks([]);
+  }, [tracks.length]);
+
   const onSave = useCallback(async () => {
     setSaveState({ kind: 'saving' });
+    // Snapshot des Stands, der gerade rausgeschickt wird — damit baseline
+    // exakt dem entspricht, was der Server geschrieben hat (nicht dem, was
+    // zwischenzeitlich im UI weitergetippt wurde).
+    const sentTracks = tracks;
     try {
       const res = await fetch('/api/library', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ builtAt: initialLibrary.builtAt, tracks }),
+        body: JSON.stringify({ builtAt: initialLibrary.builtAt, tracks: sentTracks }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -85,6 +109,7 @@ export default function LibraryEditor({ initialLibrary }: Props) {
         return;
       }
       const body = (await res.json()) as { ok: boolean; trackCount: number };
+      setBaseline(sentTracks);
       setSaveState({
         kind: 'saved',
         trackCount: body.trackCount,
@@ -99,7 +124,7 @@ export default function LibraryEditor({ initialLibrary }: Props) {
   }, [tracks, initialLibrary.builtAt]);
 
   return (
-    <main className="mx-auto max-w-7xl p-6">
+    <section>
       <header className="mb-6 flex items-end justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold">Library Editor</h1>
@@ -114,11 +139,26 @@ export default function LibraryEditor({ initialLibrary }: Props) {
           <SaveStatusBadge state={saveState} dirty={isDirty} />
           <button
             type="button"
+            onClick={clearAll}
+            disabled={tracks.length === 0 || saveState.kind === 'saving'}
+            className="rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm font-medium text-red-200 hover:bg-red-900/40 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+            title="Alle Tracks aus der Library entfernen"
+          >
+            Alle entfernen
+          </button>
+          <button
+            type="button"
             onClick={onSave}
             disabled={!isDirty || saveState.kind === 'saving'}
-            className="rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white shadow disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
+            className="inline-flex items-center gap-2 rounded-md bg-purple-600 px-4 py-2 text-sm font-medium text-white shadow disabled:cursor-not-allowed disabled:bg-zinc-700 disabled:text-zinc-400"
           >
-            {saveState.kind === 'saving' ? 'Speichere...' : 'Speichern'}
+            {saveState.kind === 'saving' && (
+              <span
+                aria-hidden
+                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+              />
+            )}
+            {saveState.kind === 'saving' ? 'Speichere…' : 'Speichern'}
           </button>
         </div>
       </header>
@@ -134,6 +174,9 @@ export default function LibraryEditor({ initialLibrary }: Props) {
               <th className="px-3 py-2">Spotify-Genres</th>
               <th className="px-3 py-2">Mood-Tags</th>
               <th className="px-3 py-2">Energy</th>
+              <th className="px-3 py-2">
+                <span className="sr-only">Entfernen</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -143,12 +186,24 @@ export default function LibraryEditor({ initialLibrary }: Props) {
                 track={track}
                 onToggleMood={toggleMood}
                 onUpdate={updateTrack}
+                onRemove={removeTrack}
               />
             ))}
+            {tracks.length === 0 && (
+              <tr>
+                <td
+                  colSpan={8}
+                  className="px-3 py-6 text-center text-xs text-zinc-500"
+                >
+                  Library ist leer. Über "Library bauen" oben neue Tracks
+                  laden oder die Datei direkt befüllen.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
-    </main>
+    </section>
   );
 }
 
@@ -160,7 +215,15 @@ function SaveStatusBadge({
   dirty: boolean;
 }) {
   if (state.kind === 'saving') {
-    return <span className="text-xs text-zinc-400">Speichere...</span>;
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-zinc-400">
+        <span
+          aria-hidden
+          className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-current border-t-transparent"
+        />
+        Speichere…
+      </span>
+    );
   }
   if (state.kind === 'error') {
     return (
@@ -186,10 +249,12 @@ function TrackRow({
   track,
   onToggleMood,
   onUpdate,
+  onRemove,
 }: {
   track: LibraryTrack;
   onToggleMood: (uri: string, tag: MoodTag) => void;
   onUpdate: (uri: string, patch: Partial<LibraryTrack>) => void;
+  onRemove: (uri: string) => void;
 }) {
   return (
     <tr className="border-t border-zinc-800 align-top">
@@ -260,6 +325,17 @@ function TrackRow({
           value={track.energyLevel}
           onChange={(v) => onUpdate(track.uri, { energyLevel: v })}
         />
+      </td>
+      <td className="px-3 py-3 text-right">
+        <button
+          type="button"
+          onClick={() => onRemove(track.uri)}
+          className="rounded bg-zinc-800 px-2 py-1 text-sm text-zinc-400 hover:bg-red-900/50 hover:text-red-200"
+          title={`"${track.title}" entfernen`}
+          aria-label={`"${track.title}" entfernen`}
+        >
+          ×
+        </button>
       </td>
     </tr>
   );

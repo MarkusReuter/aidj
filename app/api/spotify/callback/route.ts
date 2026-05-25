@@ -6,17 +6,20 @@
  * den Hinweis und kann sich später dort spotify-spezifische Statuszeile holen).
  * Bei Fehler → HTML-Seite mit Fehlermeldung, weil der User in einem Browser-Tab
  * gelandet ist und JSON nicht hilfreich wäre.
+ *
+ * Implementierungs-Hinweis: lesen via `request.cookies` (Request-bound, immer
+ * frisch), schreiben via `NextResponse`-Objekt — gleicher Grund wie im
+ * Auth-Start-Handler (cookies()/redirect() ist in Route Handlers historisch
+ * flackrig).
  */
 
-import { cookies } from 'next/headers';
-import { redirect } from 'next/navigation';
-import type { NextRequest } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { exchangeCodeForToken, SpotifyConfigError } from '@/lib/spotify';
 import { SPOTIFY_OAUTH_STATE_COOKIE } from '../auth/route';
 
 export const dynamic = 'force-dynamic';
 
-function errorPage(title: string, detail: string): Response {
+function errorPage(title: string, detail: string): NextResponse {
   const safeTitle = title.replace(/</g, '&lt;');
   const safeDetail = detail.replace(/</g, '&lt;');
   const html = `<!doctype html>
@@ -28,10 +31,13 @@ function errorPage(title: string, detail: string): Response {
 <pre style="background:#1a1a1a;padding:1rem;border-radius:.5rem;white-space:pre-wrap">${safeDetail}</pre>
 <p><a href="/api/spotify/auth">Erneut versuchen</a></p>
 </body></html>`;
-  return new Response(html, {
+  const res = new NextResponse(html, {
     status: 400,
     headers: { 'Content-Type': 'text/html; charset=utf-8' },
   });
+  // State-Cookie räumen, falls noch einer rumhängt.
+  res.cookies.delete(SPOTIFY_OAUTH_STATE_COOKIE);
+  return res;
 }
 
 export async function GET(request: NextRequest): Promise<Response> {
@@ -54,15 +60,39 @@ export async function GET(request: NextRequest): Promise<Response> {
     );
   }
 
-  const cookieStore = await cookies();
-  const storedState = cookieStore.get(SPOTIFY_OAUTH_STATE_COOKIE)?.value;
-  // State-Cookie immer löschen — egal ob Verifikation klappt oder nicht.
-  cookieStore.delete(SPOTIFY_OAUTH_STATE_COOKIE);
+  const storedState = request.cookies.get(SPOTIFY_OAUTH_STATE_COOKIE)?.value;
 
-  if (!storedState || storedState !== state) {
+  if (!storedState) {
+    return errorPage(
+      'State-Cookie fehlt',
+      [
+        'Der CSRF-State-Cookie ist beim Callback nicht angekommen.',
+        '',
+        'Mögliche Ursachen:',
+        '  • Die App und SPOTIFY_REDIRECT_URI nutzen unterschiedliche Origins',
+        '    (z.B. App auf http://192.168.x.x:3000 geöffnet, aber',
+        '     SPOTIFY_REDIRECT_URI=http://localhost:3000/...).',
+        '    → Öffne /admin auf demselben Host wie die Redirect-URI.',
+        '  • Browser blockt Third-Party-/Cross-Site-Cookies (Safari Strict Mode).',
+        '    → Anderer Browser oder Incognito-Tab testen.',
+        '  • Cookie ist abgelaufen (>10 Minuten zwischen Klick & Callback).',
+        '',
+        'Starte den Flow erneut.',
+      ].join('\n'),
+    );
+  }
+
+  if (storedState !== state) {
     return errorPage(
       'State-Mismatch (CSRF-Schutz)',
-      'Der `state`-Parameter aus der Spotify-Response passt nicht zum Cookie. Browser-Cookies geblockt? Anderer Tab? Starte den Flow neu.',
+      [
+        `Cookie-State: ${storedState.slice(0, 8)}…`,
+        `URL-State:    ${state.slice(0, 8)}…`,
+        '',
+        'Typisch: Auth wurde in zwei Tabs parallel gestartet — der zweite Tab',
+        'hat den Cookie überschrieben, dann ist der erste Tab zurückgekommen.',
+        'Schließe alle /api/spotify/auth-Tabs und starte einmal frisch.',
+      ].join('\n'),
     );
   }
 
@@ -78,5 +108,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     );
   }
 
-  redirect('/admin?spotify=connected');
+  const res = NextResponse.redirect(new URL('/admin?spotify=connected', request.url));
+  res.cookies.delete(SPOTIFY_OAUTH_STATE_COOKIE);
+  return res;
 }

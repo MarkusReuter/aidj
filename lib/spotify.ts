@@ -25,6 +25,9 @@ const SCOPES = [
   'user-modify-playback-state',
   'user-read-playback-state',
   'user-read-currently-playing',
+  // Phase 4b: Library-Build aus eigenen Playlists. `playlist-read-collaborative`
+  // ist nicht nötig — `/v1/me/playlists` listet auch ohne ihn alle Collab-Playlists.
+  'playlist-read-private',
 ];
 
 export type SpotifyTokenFile = {
@@ -57,6 +60,22 @@ export class SpotifyConfigError extends Error {
   constructor(message: string) {
     super(message);
     this.name = 'SpotifyConfigError';
+  }
+}
+
+/**
+ * Wird geworfen, wenn der gespeicherte Token einen geforderten Scope nicht hat.
+ * API-Routen mappen das auf HTTP 401 `{error: 'reauth_required'}`, die UI zeigt
+ * dann einen Banner "Spotify neu verbinden" → öffnet /api/spotify/auth.
+ */
+export class SpotifyScopeError extends Error {
+  readonly missingScope: string;
+  constructor(missingScope: string) {
+    super(
+      `Spotify-Scope "${missingScope}" fehlt — Re-Auth nötig via /api/spotify/auth.`,
+    );
+    this.name = 'SpotifyScopeError';
+    this.missingScope = missingScope;
   }
 }
 
@@ -223,11 +242,36 @@ export async function isConnected(): Promise<boolean> {
 }
 
 /**
+ * Prüft, ob der gespeicherte Token einen bestimmten Scope hat. Spotify gibt
+ * Scopes als space-separated String zurück (`scope: "a b c"`); wir tokenizen
+ * und matchen exakt. Wirft `SpotifyNotConnectedError`, wenn kein Token da ist.
+ */
+export async function hasScope(name: string): Promise<boolean> {
+  const token = await loadToken();
+  if (!token) throw new SpotifyNotConnectedError();
+  return token.scope.split(/\s+/).filter(Boolean).includes(name);
+}
+
+/**
+ * Bequemer Wrapper: `await requireScope('playlist-read-private')` an den
+ * Anfang eines Endpoints stellen → Routen-Code muss nur `SpotifyScopeError`
+ * fangen, nicht jede Scope-Prüfung explizit ausformulieren.
+ */
+export async function requireScope(name: string): Promise<void> {
+  if (!(await hasScope(name))) {
+    throw new SpotifyScopeError(name);
+  }
+}
+
+/**
  * Wrapper um `fetch()` zur Spotify-Web-API. Setzt den Bearer-Header und
  * versucht bei 401 einen einmaligen Force-Refresh + Retry. Bei allen anderen
  * Fehlern wird die Response unverändert zurückgegeben — Caller entscheidet.
+ *
+ * Exportiert für Wiederverwendung in `lib/library-build.ts` (Phase 4b) — die
+ * `fetchSpotify`-Funktion wird dort als Dependency injiziert.
  */
-async function spotifyFetch(path: string, init: RequestInit = {}): Promise<Response> {
+export async function spotifyFetch(path: string, init: RequestInit = {}): Promise<Response> {
   const url = path.startsWith('http') ? path : `https://api.spotify.com${path}`;
   let token = await getAccessToken();
   const doFetch = () =>
@@ -359,4 +403,110 @@ export async function skipToNext(deviceId?: string): Promise<void> {
     throw new Error('Kein aktives Spotify-Device für skip.');
   }
   throw new Error(`skipToNext: ${res.status} ${await res.text()}`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 4b: Eigene User-Identity + Playlists (für /admin Library-Build).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SpotifyMe = {
+  id: string;
+  displayName: string | null;
+};
+
+let cachedMe: SpotifyMe | null = null;
+
+/**
+ * Liefert die eigene Spotify-User-Identity. Wird pro Prozess gecached — die ID
+ * ändert sich nicht über die Lifetime des Tokens. Cache wird bei Re-Auth nicht
+ * automatisch invalidiert; falls jemand mit anderem Account neu verbindet,
+ * App neustarten (oder explizit `clearMeCache()` aufrufen).
+ */
+export async function getMe(): Promise<SpotifyMe> {
+  if (cachedMe) return cachedMe;
+  const res = await spotifyFetch('/v1/me');
+  if (!res.ok) {
+    throw new Error(`getMe: ${res.status} ${await res.text()}`);
+  }
+  const data = (await res.json()) as { id: string; display_name: string | null };
+  cachedMe = { id: data.id, displayName: data.display_name };
+  return cachedMe;
+}
+
+export function clearMeCache(): void {
+  cachedMe = null;
+}
+
+export type SpotifyPlaylistSummary = {
+  id: string;
+  name: string;
+  ownerId: string;
+  ownerName: string;
+  isOwn: boolean;
+  trackCount: number;
+  /** Bei selbst-erstellten Playlists ohne Cover gibt Spotify ein leeres `images`-Array zurück. */
+  coverUrl: string | null;
+};
+
+type RawPlaylist = {
+  id: string;
+  name: string;
+  // Spotify liefert für gelegentlich kaputte/gelöschte Playlists null oder
+  // unvollständige Sub-Objekte. Alle Felder defensiv typisieren.
+  owner: { id: string; display_name: string | null } | null;
+  // Track-Counter heißt in der aktuellen Spotify-API `items` (nicht `tracks`,
+  // wie ältere Doku-Versionen suggerieren). Wir fallen defensiv auf `tracks`
+  // zurück, falls Spotify das alte Feld irgendwo doch noch liefert.
+  items?: { total: number } | null;
+  tracks?: { total: number } | null;
+  images: { url: string; width: number | null; height: number | null }[] | null;
+};
+
+/**
+ * Listet alle Playlists des angemeldeten Users (eigene + abonnierte +
+ * kollaborative). Paginiert die Spotify-Antwort durch, max. 50 pro Page.
+ * Markiert `isOwn` via Match gegen `getMe().id`.
+ *
+ * Wirft `SpotifyScopeError`, wenn der Token den Scope nicht hat → Caller mappt
+ * auf HTTP 401 `reauth_required`.
+ */
+export async function getMyPlaylistsPaginated(): Promise<SpotifyPlaylistSummary[]> {
+  await requireScope('playlist-read-private');
+  const me = await getMe();
+  const out: SpotifyPlaylistSummary[] = [];
+  let url: string | null = '/v1/me/playlists?limit=50';
+  while (url) {
+    const res: Response = await spotifyFetch(url);
+    if (res.status === 403) {
+      // Defensiver Fallback, falls Spotify trotz vorhandenem Scope-Token 403 liefert.
+      throw new SpotifyScopeError('playlist-read-private');
+    }
+    if (!res.ok) {
+      throw new Error(
+        `getMyPlaylistsPaginated: ${res.status} ${await res.text()}`,
+      );
+    }
+    const page = (await res.json()) as {
+      items: (RawPlaylist | null)[] | null;
+      next: string | null;
+    };
+    for (const p of page.items ?? []) {
+      // Spotify liefert gelegentlich null-Items oder Playlists ohne Owner/Tracks
+      // (gelöscht, kaputt, Migrationen). Solche Einträge überspringen statt crashen.
+      if (!p || !p.id || !p.owner?.id) continue;
+      out.push({
+        id: p.id,
+        name: p.name ?? '(ohne Namen)',
+        ownerId: p.owner.id,
+        ownerName: p.owner.display_name ?? p.owner.id,
+        isOwn: p.owner.id === me.id,
+        trackCount: p.items?.total ?? p.tracks?.total ?? 0,
+        coverUrl: p.images?.[0]?.url ?? null,
+      });
+    }
+    url = page.next
+      ? page.next.replace('https://api.spotify.com', '')
+      : null;
+  }
+  return out;
 }

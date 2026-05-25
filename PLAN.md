@@ -317,7 +317,8 @@ Hybrid-Ansatz wie gewünscht: BPM von Drittquelle, Genre von Spotify, Mood manue
 
 **Setup, das jetzt fällig wird** (in Phase 0 bewusst ausgelassen):
 - Installieren: `@spotify/web-api-ts-sdk`.
-- `.env.local` anlegen mit `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI=http://localhost:3000/api/spotify/callback`.
+- `.env.local` anlegen mit `SPOTIFY_CLIENT_ID`, `SPOTIFY_CLIENT_SECRET`, `SPOTIFY_REDIRECT_URI=http://127.0.0.1:3000/api/spotify/callback`.
+  - **Wichtig**: Spotify hat seit Nov. 2024 `localhost` als Redirect-URI gesperrt — nur `127.0.0.1` (oder HTTPS-Hosts) werden akzeptiert. Konsequenz: die App auch im Browser über `http://127.0.0.1:3000/...` öffnen, **nicht** über `localhost:3000` — sonst Cookie-Origin-Mismatch beim OAuth-Callback (Browser behandelt `localhost` und `127.0.0.1` als unterschiedliche Origins).
 - Spotify Dev Dashboard: App registrieren, Redirect-URI eintragen, Premium-Account dort als Test-User hinterlegen (App ist im Development-Mode, nur eingetragene User dürfen sich einloggen).
 
 **OAuth-Flow**: **Authorization Code Flow** (ohne PKCE). Die App läuft als Confidential Client lokal auf dem Mac mit Zugriff auf den Client Secret — PKCE wäre nur für Public Clients (SPA/Mobile) nötig und würde uns hier keine zusätzliche Sicherheit bringen. Scopes: `user-modify-playback-state user-read-playback-state user-read-currently-playing`.
@@ -434,6 +435,160 @@ export const guestQueue = {
 **Anti-Trolling-Schutz** (offen — finale Werte in Implementierung):
 - Maximale Gast-Queue-Länge: 5 oder 10? Wenn voll → neue Submissions 429.
 - Optionaler Quota-Timeout: wenn Track 15 min in `pending` ohne dass er drangekommen ist → automatisch `markDone`, Slot frei.
+
+### Phase 4b: Library-Build im Admin (Playlist-Picker, additiver Build, Spotify-Status)
+
+**Status: durch.** Was beim Bauen über die ursprüngliche Planung hinaus gelernt wurde, ist unten unter "Spotify-API-Realität (2025/2026)" zusammengefasst — relevant für künftige Erweiterungen.
+
+**Ziel**: Den CLI-Aufruf `npm run build-library -- <uri>` als Primärweg ablösen. Host wählt seine eigenen Spotify-Playlists in `/admin` per Checkbox, baut die Library im Browser, sieht Live-Progress. CLI bleibt als Power-User-Fallback. Build ist **additiv** — bestehende Tracks bleiben unverändert, neue URIs werden angehängt; das schützt vor Datenverlust durch Fehlbedienung und macht Re-Builds quasi gratis (alle BPM-/Mood-/Energy-Edits bleiben automatisch erhalten, weil nichts überschrieben wird).
+
+**Voraussetzung**: PLAN-Phase 3 (Spotify-OAuth) ist durch — wir nutzen den existierenden User-Token statt des Client-Credentials-Flows im CLI. PLAN-Phase 4 (SSE-Infrastruktur) liefert das Pattern für die Build-Progress-Events.
+
+**OAuth-Scope** (`lib/spotify.ts`):
+- `SCOPES` um `playlist-read-private` erweitert. `playlist-read-collaborative` ist **nicht** nötig: `/v1/me/playlists` listet auch ohne ihn alle Playlists, an denen der User Collaborator ist.
+- `hasScope(name)`-Helper tokenized den space-separated `scope`-String aus `token.json` und prüft **vor** dem Spotify-Call. Fehlt der Scope → Endpoints liefern HTTP 401 `{error: 'reauth_required'}` deterministisch (kein 403-Spotify-Roundtrip nötig). `requireScope(name)`-Wrapper wirft `SpotifyScopeError`, den die Routes auf 401 mappen.
+- Re-Auth: `exchangeCodeForToken()` schreibt `token.json` neu mit dem aktualisierten Refresh-Token (verdrängt den alten). Kein manuelles Revoking.
+- Helper: `getMe()` (Result pro Prozess gecached für `isOwn`-Check via `currentUser.id === playlist.owner.id`), `getMyPlaylistsPaginated()`, `clearMeCache()` (für Account-Wechsel-Edge-Case).
+
+**Connection-Status-Banner** (`app/admin/ConnectionStatus.tsx`, Server Component):
+- Wird in `app/admin/page.tsx` server-seitig befüllt (`Promise.all([loadLibrary(), getSpotifyStatus()])`) — kein extra Browser-Roundtrip.
+- Drei Zustände: grün (verbunden + Scope OK + User-Display-Name), orange (verbunden aber Scope fehlt), rot (gar nicht verbunden). Jeweils mit Connect-/Re-Connect-Link auf `/api/spotify/auth`.
+- Erklärt im Banner: der Spotify-Token liegt **server-seitig** in `~/.aidj-app/token.json`, nicht im Browser. Eine Browser-Session (Normal vs Inkognito) hat keinen Einfluss auf die Auth — Inkognito war nur Workaround für das OAuth-Cookie-Origin-Problem, nicht für die Auth selbst.
+
+**Build-Logik** (`lib/library-build.ts`, Server-Only):
+- Reine Funktionen, Spotify-Fetch wird injiziert: `fetchPlaylistTracks`, `fetchArtistsBulk`, `fetchBpmResilient`, `buildLibraryFromPlaylists({playlistIds, fetchSpotify, bpmKey, existing, onProgress})`.
+- CLI und Web-UI teilen sich den Code: CLI injiziert Client-Credentials-Fetch, Web-UI das User-OAuth-`spotifyFetch()`.
+- **Additivität**: Build dedupliziert neue Playlist-Tracks gegen URIs in der bestehenden Library; nur **neue** Tracks werden gefetcht + angereichert. `existing.tracks` bleibt 1:1 erhalten, neue hängen hinten dran. Konsequenzen: (a) Mood-Tags/Energy/BPM bleiben trivial bestehen (nichts wird überschrieben), (b) ein versehentlicher Build mit 0 zugänglichen Playlists frisst nicht den Bestand, (c) `builtAt` wird nur aktualisiert, wenn auch wirklich was hinzukam — "Build mit 0 neuen Tracks" sieht nicht aus wie frische Library.
+- **BPM-Parallelisierung**: `mapWithConcurrency(tracks, 2, fetchBpmOne)` + 500ms Inter-Sleep pro Worker. Concurrency 2 mit Sleep ist konservativ gegen das undokumentierte GetSongBPM-Free-Limit (~150 req/min).
+- **BPM throw-safe**: `fetchBpmOnce` returnt `{bpm, status}`, niemals Throw. `fetchBpmResilient` wrappt mit zwei Retries (`sleep(2000)` → `sleep(4000)`) bei 429 ODER 5xx (Cloudflare-Schutz antwortet bei Burst-Traffic mit 503/HTML statt 429); finaler Fail → `bpm: null`. Status mitprotokolliert.
+- **Artists-Lookup 403-Fallback**: Spotify hat im Dev-Mode auch `/v1/artists` eingeschränkt. `fetchArtistsBulk` wirft `ArtistsLookupForbiddenError` bei 403; der Orchestrator fängt das, emittet ein `warning`-Event und fährt mit leerer `artistMap` weiter — Tracks bekommen `spotifyGenres: []`. Genres sind sekundäre Metadata; DJ-Brain (Phase 5) ist auf Moods/Energy/BPM viel angewiesener.
+- **Playlist-403-Fallback**: `fetchPlaylistTracks` wirft `PlaylistForbiddenError` bei 403 (Spotify-Dev-Mode oder Playlist-spezifische Sperre); Orchestrator skippt die Playlist, sammelt sie in `skippedPlaylists`, Build crasht nicht.
+- Helper-Inline (~15 Zeilen, keine Dependency):
+  ```ts
+  async function mapWithConcurrency<T, R>(
+    items: T[],
+    limit: number,
+    fn: (item: T, idx: number) => Promise<R>,
+  ): Promise<R[]> {
+    const out: R[] = new Array(items.length);
+    let next = 0;
+    const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+      while (true) {
+        const i = next++;
+        if (i >= items.length) return;
+        out[i] = await fn(items[i], i);
+      }
+    });
+    await Promise.all(workers);
+    return out;
+  }
+  ```
+
+**Erwartete Wall-Clock-Zeiten** (Faustregel; reale Latenzen schwanken je nach GetSongBPM-Hit-Rate von 60–80% und Spotify-Dev-Mode-Restriktionen):
+
+| Szenario | Vor Phase 4b | Nach Phase 4b |
+|---|---|---|
+| Frischer Build, 100 neue Tracks (BPM-Key gesetzt) | ~140 s | ~60 s |
+| Frischer Build, 300 neue Tracks (BPM-Key gesetzt) | ~420 s | ~180 s |
+| Build mit gemischter Auswahl (50 neue + 50 schon im Bestand) | ~140 s | ~30 s |
+| Build mit identischen Playlists (alle Tracks schon im Bestand) | ~115 s | ~2 s |
+| Frischer Build ohne BPM-Key | ~10 s | ~5 s |
+
+Hinweise:
+- Wenn `/v1/artists` 403't (Dev-Mode), entfällt Phase 2 komplett — der Build wird dadurch sogar schneller, allerdings ohne `spotifyGenres`.
+- Die "schon im Bestand"-Tracks werden gar nicht neu angefasst (additiv), nicht nur "BPM preserved" — sie werden im Build-Loop einfach geskippt.
+
+**Neue API-Endpoints — Two-Step-SSE-Pattern**:
+
+`app/api/spotify/status/route.ts` (`GET`):
+- Antwort: `{connected, hasPlaylistScope, user: {id, displayName} | null}`. Wird vom ConnectionStatus auch indirekt benutzt (Server Component ruft die `lib/spotify.ts`-Helper direkt) — Endpoint primär für künftige Client-Refreshes.
+
+`app/api/spotify/playlists/route.ts` (`GET`):
+- Paginiert `GET /v1/me/playlists?limit=50` durch.
+- Antwort: `{playlists: Array<{id, name, ownerId, ownerName, isOwn, trackCount, coverUrl: string | null}>}`. `coverUrl` ist nullable — selbst-erstellte Playlists ohne Cover haben leeres `images`-Array.
+- `trackCount` liest `items.total` mit Fallback auf `tracks.total` — Spotify hat das Feld umbenannt (siehe Spotify-API-Realität unten).
+- Defensive Null-Checks: `page.items`, `playlist.owner`, `playlist.images` können null sein (gelöschte/migrierte Playlists). Solche Items überspringen statt crashen.
+- Fehlender Scope → 401 `{error: 'reauth_required'}` (proaktiv via `hasScope`).
+
+`app/api/library/build/route.ts` (`POST`):
+- Body: `{playlistIds: string[]}` mit Base62-ID-Validierung.
+- Frühe Auth-Checks: `requireScope('playlist-read-private')` + `/v1/me`-Probe scheitern explizit, bevor ein Job gestartet wird.
+- Erzeugt Job-ID, startet Build async im Hintergrund, antwortet sofort mit `{jobId, bpmEnabled}`.
+- Job-Singleton in `lib/library-build.ts`: nur ein Build gleichzeitig. Zweiter POST → 409 `{error: 'build_in_progress', jobId: <aktuelle>}` — Caller kann am laufenden Stream attachen statt zu warten.
+
+`app/api/library/build/[jobId]/stream/route.ts` (`GET`, SSE):
+- Nativer `EventSource`-Endpoint. Events:
+  - `phase` (`{phase: 'playlists'|'artists'|'tracks', message}`)
+  - `progress` (`{currentIndex, totalTracks, bpmHits, bpmMisses}`)
+  - `track` (jeder fertige `LibraryTrack`)
+  - `warning` (`{playlistId?, message}` — übersprungene Playlists, Artists-403-Fallback)
+  - `done` (`{trackCount, addedCount, alreadyPresentCount, bpmHits, skippedPlaylists}`)
+  - `error` (`{message}`)
+- Beim Connect wird der bisherige `eventLog` als Replay rausgepusht (Re-Attach nach Disconnect). Wenn Job schon `done`/`error`: nur Replay, dann Stream-Close.
+- `EventEmitter` pro Job. Bei `cancel()` des Streams: nur die Subscription gelöst — der **Job läuft weiter** (Browser-Close mid-Build verliert keinen Fortschritt).
+- Mehrere Tabs können denselben Stream attachen.
+- Nicht-existierende `jobId` → 404.
+
+`app/api/library/route.ts` (`PUT`) — **Race-Schutz**:
+- Vor `saveLibrary()` und nochmal nach Schema-Parse: `libraryBuild.isRunning()` → wenn ja, 409 `{error: 'build_in_progress'}`. Verhindert dass ein Editor-Save mid-Build die Build-Output über- oder weg-schreibt.
+
+**Admin-UI** (`app/admin/PlaylistPicker.tsx`, `'use client'`):
+
+Neue Komponente, unter dem `<ConnectionStatus>`-Banner und über dem `<LibraryEditor>` in `app/admin/page.tsx`. Wird nur gerendert, wenn `connected && hasPlaylistScope` — sonst dominiert der Status-Banner mit Connect-Link.
+
+```
+┌─ ConnectionStatus (Server-Component) ──────────────────┐
+│ ● Spotify verbunden als markusreuter-de [neu verbinden]│
+└────────────────────────────────────────────────────────┘
+┌─ Library bauen ─────────────────────────────────┐
+│  [Playlists aus Spotify laden]                  │
+│  🔍 [Filter…]              ☑ Eigene zuerst      │
+│  ☑ Peak Time         (88 Tracks · Markus eigene)│
+│  ☐ Warm-Up           (42 Tracks · Markus eigene)│
+│  [Library bauen — 1 Playlist, ~88 Tracks]       │
+│                                                 │
+│  Build-Status (live):                           │
+│   Phase: Tracks 47/88 · BPM-Hits 31             │
+│   ⚠ Spotify-Artist-API (Bulk) gibt 403 …        │
+│   ✓ Strobe — deadmau5 — 128 BPM                 │
+└─────────────────────────────────────────────────┘
+```
+
+State-Maschine: `idle` → `loading` (GET Playlists) → `picking` (Liste + Filter + Build-Button) → `building` (`POST` liefert `jobId`, dann `new EventSource('/api/library/build/' + jobId + '/stream')`) → `done` (Done-Box: "X neu hinzugefügt · Y schon im Bestand übersprungen · Z BPM-Hits · Library hat jetzt N Tracks", plus Liste der via 403 übersprungenen Playlists mit Owner-Info) → `error`. Die `picking`-Stage bleibt in `done`/`error` weiter sichtbar, sodass der User direkt nochmal builden kann.
+
+**LibraryEditor-Re-Init nach Build-Done**: `LibraryEditor` ist Client Component mit `useState(initialLibrary)`. `router.refresh()` ändert nicht den initialisierten State. → `app/admin/page.tsx` setzt `<LibraryEditor key={library.builtAt ?? 'empty'} initialLibrary={library} />`. Nach Build-Done bumpt `builtAt` (neuer Timestamp), Key ändert sich, React unmount/remount mit den frischen Tracks. `PlaylistPicker` triggert `router.refresh()` im `done`-Listener.
+
+**CLI behalten** (`scripts/build-library.ts`):
+- Dünner Wrapper über `lib/library-build.ts` mit Client-Credentials-Fetch.
+- Profitiert automatisch von Concurrency + Additivität + 403-Fallbacks.
+- **CLI-Limitation**: Client-Credentials liest nur **public** Playlists. Eigene private Playlists nur über `/admin`.
+
+**Edge-Cases**:
+- **Sehr lange Builds**: SSE hält UI responsive. Browser-Close mid-Build verliert nichts — Job läuft serverseitig weiter, am Ende landet `library.json` auf Disk.
+- **Build-Cancel**: V1 nicht implementiert.
+- **Re-attach an laufenden Job**: zweiter Tab macht `POST` mit Selection → 409 + `jobId` zurück → UI attached automatisch am Stream der laufenden Job-ID statt Fehler.
+- **Kein `GETSONGBPM_API_KEY`**: Build läuft fast instant, BPMs alle `null`. Done-Status zeigt "ohne BPM-Daten".
+- **Editor während Build gespeichert**: PUT /api/library liefert 409 → Editor-UI zeigt die Fehlermeldung.
+- **Systematische 429/503 von GetSongBPM**: Track wird nach Backoff-Erschöpfung mit `bpm: null` markiert. Build läuft weiter.
+- **Spotify-Dev-Mode-403 auf einzelne Playlists**: Playlist wird übersprungen + in `skippedPlaylists` aufgelistet, mit Owner-Info im Done-Status.
+- **Spotify-Dev-Mode-403 auf `/v1/artists`**: Genres bleiben leer, Build läuft mit Warning-Event weiter.
+- **Sehr viele Playlists (500+)**: Filter-Input ist Pflicht (im Design), Virtual-Scroll noch nicht nötig.
+- **Out-of-Scope für V1**: Build-History, Diff-View, selektives Entfernen einer Playlist aus der Library, Build-Cancel-Button.
+
+#### Spotify-API-Realität (2025/2026) — Lessons Learned
+
+Beim Implementieren von Phase 4b sind mehrere Spotify-Endpoint-Verträge aufgefallen, die in älterer Doku noch anders dokumentiert sind. Wer hier später anfasst, sollte das wissen:
+
+1. **`redirect_uri` muss `127.0.0.1` sein, nicht `localhost`** (Spotify-Policy seit Nov. 2024). Konsequenz: App im Browser über `http://127.0.0.1:3000/...` öffnen, sonst Cookie-Origin-Mismatch beim Callback (Browser sieht `localhost` ≠ `127.0.0.1`).
+2. **Playlist-Tracks heißt jetzt `/items` statt `/tracks`**. Der alte Endpoint gibt für neuere/aktualisierte Playlists `403 Forbidden`, für ältere noch 200 — Mischzustand, der mit "funktioniert für manche Playlists" verwirrt. `/items` ist universell. Container-Feld pro Item heißt **`item`** (nicht `track`); Track-Felder (artists, duration_ms, uri, album.images, name, is_local, type) sind identisch.
+3. **Playlist-Track-Counter im `/me/playlists`-Response heißt `items.total`** (nicht `tracks.total`).
+4. **`/v1/artists` (Bulk-Lookup) gibt im Dev-Mode 403** — Spotify hat das für non-production-Apps gesperrt. Fallback: leere `spotifyGenres` pro Track, Build läuft weiter, Warning ans UI. Production-Mode (Approval-Prozess im Spotify-Dashboard) hebt das vermutlich auf.
+5. **Single-Playlist-`/v1/playlists/{id}` (Metadata) funktioniert**, nur `/tracks` als Sub-Resource ist deprecated. Damit kann man Playlist-Namen/-Owner für Diagnose unabhängig vom Track-Endpoint holen.
+6. **`/me/playlists`-Response enthält null-Items + null-Sub-Objects** (`owner`, `images`, gelegentlich auch `tracks`/`items`) für gelöschte/migrierte/cover-lose Playlists. Defensiv: alle Sub-Accesses mit `?.` und Defaults.
+
+Future Considerations:
+- Wenn Phase 5 (DJ-Brain) Genre-Hinweise braucht, lohnt sich der Production-Mode-Antrag im Spotify-Dashboard ("Request Extension"). Bis dahin reicht der Mood-Tag-Editor + BPM als semantisches Signal.
+- Beim Hochziehen weiterer Spotify-Endpoints (Search in Phase 3a, …) immer erst eine Live-Probe gegen den Token machen, bevor Schema-Annahmen aus älteren Doku-Versionen festgeklopft werden.
 
 ### Phase 5: DJ-Brain (Vercel AI SDK + Claude)
 
@@ -556,11 +711,18 @@ export async function proposeNextCandidates(state: PartyState) {
 | `app/api/state/stream/route.ts` | 4 | SSE endpoint (Track + Kandidaten + Mood + Counts) |
 | `app/api/state/button/route.ts` | 4 | Button-Press receiver (Mood / Playlist / Anti) |
 | `app/api/queue/commit/route.ts` | 4 | Crowd-Tap auf Kandidaten-Karte → queue track |
-| `lib/spotify.ts` | 3 | Spotify SDK wrapper |
+| `lib/spotify.ts` | 3 + 4b | Spotify SDK wrapper (Phase 4b: + `playlist-read-private`-Scope, `hasScope`/`requireScope`/`SpotifyScopeError`/`getMe`/`getMyPlaylistsPaginated`/`spotifyFetch` exportiert) |
 | `lib/dj-brain.ts` | 5 | Vercel-AI-SDK orchestration |
 | `lib/state.ts` | 4 | In-Memory state + button aggregation |
 | `lib/library.ts` | 2 | Library load/query |
-| `scripts/build-library.ts` | 2 | One-time library tagging tool |
+| `lib/library-build.ts` | 4b | Shared Build-Logik + Job-Registry (Spotify-Fetch injiziert, additiver Build, BPM-Concurrency 2 + 500ms-Inter-Sleep, 429/5xx-Backoff, /items-Endpoint, Playlist-/Artists-403-Fallbacks, EventEmitter pro Job) |
+| `scripts/build-library.ts` | 2 + 4b | Library-Build-CLI (Phase 4b: dünner Wrapper über `lib/library-build.ts`) |
+| `app/api/spotify/status/route.ts` | 4b | GET Spotify-Verbindungsstatus (connected/scope/user) für ConnectionStatus |
+| `app/api/spotify/playlists/route.ts` | 4b | GET eigene + gefolgte User-Playlists für /admin-Picker |
+| `app/api/library/build/route.ts` | 4b | POST → `{jobId}` startet Build-Job |
+| `app/api/library/build/[jobId]/stream/route.ts` | 4b | GET native EventSource-SSE pro Job |
+| `app/admin/ConnectionStatus.tsx` | 4b | Server-Component: Verbindungsstatus-Banner oben in /admin |
+| `app/admin/PlaylistPicker.tsx` | 4b | Client-Component: Playlist-Auswahl + Live-Build-Progress |
 | `data/library.json` | 2 | Kuratierte Track-Library |
 | `.env.local` | 3+5 | API keys (Spotify in Phase 3, Anthropic in Phase 5) |
 

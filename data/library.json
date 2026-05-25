@@ -1,261 +1,577 @@
 {
-  "builtAt": null,
+  "builtAt": "2026-05-25T13:23:32.804Z",
   "tracks": [
     {
-      "uri": "spotify:track:mock001",
-      "title": "Strobe",
-      "artist": "deadmau5",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/f7/24/19/f724197c-b6b7-b2ad-94a9-06b2f5f95455/617465226458.jpg/600x600bb.jpg",
-      "durationMs": 637000,
-      "spotifyGenres": [
-        "progressive house",
-        "electro house"
-      ],
-      "bpm": 128,
-      "moodTags": [
-        "peak",
-        "dancefloor",
-        "feelgood"
-      ],
-      "energyLevel": 7
+      "uri": "spotify:track:5IMtdHjJ1OtkxbGe4zfUxQ",
+      "title": "Escape (The Pina Colada Song)",
+      "artist": "Rupert Holmes",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273af7afb5c49afd3133fa2a6c9",
+      "durationMs": 276493,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock002",
-      "title": "One More Time",
-      "artist": "Daft Punk",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/fd/4a/77/fd4a77db-0ebc-d043-41a2-f32fa1bb0fb4/dj.qrikkdwj.jpg/600x600bb.jpg",
-      "durationMs": 320000,
-      "spotifyGenres": [
-        "french house",
-        "electro"
-      ],
-      "bpm": 123,
-      "moodTags": [
-        "feelgood",
-        "banger",
-        "dancefloor"
-      ],
-      "energyLevel": 8
+      "uri": "spotify:track:2OSfEYKhlSsLx6vn4O75RK",
+      "title": "I Want You Back",
+      "artist": "The Jackson 5",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273b5c7655529a7102aece0de36",
+      "durationMs": 178493,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock003",
-      "title": "Summer",
-      "artist": "Calvin Harris",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music211/v4/da/50/cc/da50cc80-3515-a38d-369b-0d700ffd249d/886444820448.jpg/600x600bb.jpg",
-      "durationMs": 222000,
-      "spotifyGenres": [
-        "dance pop",
-        "electro house"
-      ],
-      "bpm": 128,
-      "moodTags": [
-        "feelgood",
-        "dancefloor"
-      ],
-      "energyLevel": 7
+      "uri": "spotify:track:4TNFLwe6DhtR3Wn1JKMqMJ",
+      "title": "Makeba",
+      "artist": "Jain",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27364ba66f8a81c52364e55db50",
+      "durationMs": 248986,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock004",
-      "title": "Still D.R.E.",
-      "artist": "Dr. Dre",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music118/v4/27/6b/4c/276b4c69-99cb-6209-2fd8-3edd17ccfd06/00602517641228.rgb.jpg/600x600bb.jpg",
-      "durationMs": 270000,
-      "spotifyGenres": [
-        "g funk",
-        "west coast rap",
-        "hip hop"
-      ],
-      "bpm": 93,
-      "moodTags": [
-        "banger"
-      ],
-      "energyLevel": 6
+      "uri": "spotify:track:5pxtj7cCnv2hZe6mbS2MBx",
+      "title": "Lovin' Feeling",
+      "artist": "French 79, Kid Francescoli",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2732cda1a639cd6e26ccfc0773b",
+      "durationMs": 204933,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock005",
-      "title": "HUMBLE.",
-      "artist": "Kendrick Lamar",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music112/v4/ab/16/ef/ab16efe9-e7f1-66ec-021c-5592a23f0f9e/17UMGIM88793.rgb.jpg/600x600bb.jpg",
-      "durationMs": 177000,
-      "spotifyGenres": [
-        "conscious hip hop",
-        "rap"
-      ],
-      "bpm": 150,
-      "moodTags": [
-        "peak",
-        "banger"
-      ],
-      "energyLevel": 9
+      "uri": "spotify:track:780be5fB7823aHG06mwTat",
+      "title": "Baianá",
+      "artist": "Bakermat",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273fc7ce3acfa2e8c2479bcf621",
+      "durationMs": 180842,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock006",
-      "title": "Bodak Yellow",
-      "artist": "Cardi B",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/ca/58/e5/ca58e5e3-acb7-8ca3-6af9-ad63af3b71f1/075679873675.jpg/600x600bb.jpg",
-      "durationMs": 223000,
-      "spotifyGenres": [
-        "rap",
-        "trap"
-      ],
-      "bpm": 125,
-      "moodTags": [
-        "peak",
-        "banger"
-      ],
-      "energyLevel": 8
+      "uri": "spotify:track:4IR1ZygDYovtGiuyZFxgNt",
+      "title": "Tiramisu fraise",
+      "artist": "La Fine Equipe, Blanka",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27376e68055133b3eb9f2b8ae67",
+      "durationMs": 139464,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock007",
-      "title": "Take On Me",
-      "artist": "a-ha",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music/c6/e1/c8/mzi.ixgzfcmc.jpg/600x600bb.jpg",
-      "durationMs": 226000,
-      "spotifyGenres": [
-        "new wave pop",
-        "synth pop"
-      ],
-      "bpm": 169,
-      "moodTags": [
-        "feelgood",
-        "banger"
-      ],
-      "energyLevel": 8
+      "uri": "spotify:track:67p96tIoC4ESrod9kW331R",
+      "title": "Hot Air Balloon",
+      "artist": "Don Diablo, AR/CO",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273484d2402e2d425ac2c87ec3c",
+      "durationMs": 173658,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock008",
-      "title": "Billie Jean",
-      "artist": "Michael Jackson",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/32/4f/fd/324ffda2-9e51-8f6a-0c2d-c6fd2b41ac55/074643811224.jpg/600x600bb.jpg",
-      "durationMs": 294000,
-      "spotifyGenres": [
-        "pop",
-        "post-disco"
-      ],
-      "bpm": 117,
-      "moodTags": [
-        "feelgood",
-        "dancefloor"
-      ],
-      "energyLevel": 7
+      "uri": "spotify:track:5faMnd4SDjY9kFP4VpSPLi",
+      "title": "Breathe",
+      "artist": "Feder",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27321c49a7d540e19b2b8fc143e",
+      "durationMs": 183626,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock009",
-      "title": "Do I Wanna Know",
-      "artist": "Arctic Monkeys",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music113/v4/cc/0f/2d/cc0f2d02-5ff1-10e7-eea2-76863a55dbad/887828031795.png/600x600bb.jpg",
-      "durationMs": 272000,
-      "spotifyGenres": [
-        "modern rock",
-        "garage rock"
-      ],
-      "bpm": 85,
-      "moodTags": [
-        "melancholic"
-      ],
-      "energyLevel": 5
+      "uri": "spotify:track:7MIhUdNJtaOnDmC5nBC1fb",
+      "title": "Deep Down (feat. Never Dull)",
+      "artist": "Alok, Ella Eyre, Kenny Dope, Never Dull",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273bc81316621bf36e053458066",
+      "durationMs": 165714,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock010",
-      "title": "The Less I Know The Better",
-      "artist": "Tame Impala",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/a0/9a/2c/a09a2ca3-a5a6-814b-0af7-640dc0aef0aa/091012682261.jpg/600x600bb.jpg",
-      "durationMs": 216000,
-      "spotifyGenres": [
-        "psychedelic pop",
-        "modern rock"
-      ],
-      "bpm": 117,
-      "moodTags": [
-        "feelgood",
-        "chill"
-      ],
-      "energyLevel": 5
+      "uri": "spotify:track:4x5WHBLFK3iRH0zuuuxrbX",
+      "title": "Around the Fire",
+      "artist": "Ofenbach",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273300b55eb7ba3b5f576371513",
+      "durationMs": 175173,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock011",
-      "title": "Titi Me Pregunto",
-      "artist": "Bad Bunny",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music113/v4/b0/b9/7c/b0b97c63-14ff-8946-f34e-4239faecb1e0/820cc83e-1f8f-4738-8ee8-e1ebce5c123b.png/600x600bb.jpg",
-      "durationMs": 243000,
-      "spotifyGenres": [
-        "reggaeton",
-        "latin"
-      ],
-      "bpm": 107,
-      "moodTags": [
-        "dancefloor",
-        "peak"
-      ],
-      "energyLevel": 7
+      "uri": "spotify:track:2JOTbHmj0jwBM9bHgcVEOq",
+      "title": "Pink Soldiers",
+      "artist": "Boris Way",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2739939332d617cd3d59f71002f",
+      "durationMs": 135688,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock012",
-      "title": "Hips Don't Lie",
-      "artist": "Shakira",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music221/v4/0d/b5/8a/0db58a8b-7b17-dd53-3464-116a415d0f49/196872648836.jpg/600x600bb.jpg",
-      "durationMs": 218000,
-      "spotifyGenres": [
-        "latin pop",
-        "dance pop"
-      ],
-      "bpm": 100,
-      "moodTags": [
-        "feelgood",
-        "dancefloor"
-      ],
-      "energyLevel": 7
+      "uri": "spotify:track:02R2z7JWV0G8VuU1xs58OB",
+      "title": "Come",
+      "artist": "Jain",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27364ba66f8a81c52364e55db50",
+      "durationMs": 162360,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock013",
-      "title": "Don't Stop Me Now",
-      "artist": "Queen",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/4d/08/2a/4d082a9e-7898-1aa1-a02f-339810058d9e/14DMGIM05632.rgb.jpg/600x600bb.jpg",
-      "durationMs": 209000,
-      "spotifyGenres": [
-        "classic rock",
-        "glam rock"
-      ],
-      "bpm": 156,
-      "moodTags": [
-        "feelgood",
-        "banger"
-      ],
-      "energyLevel": 9
+      "uri": "spotify:track:5FWPdgtQACI6DPE2CBPUpm",
+      "title": "Woop Baby",
+      "artist": "letherette",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2739c2ccb85534d1b99ddc18e13",
+      "durationMs": 127730,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock014",
-      "title": "Don't Start Now",
-      "artist": "Dua Lipa",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music116/v4/41/ee/66/41ee66fa-f8dd-7e82-155a-3a1b360dc562/190295322175.jpg/600x600bb.jpg",
-      "durationMs": 183000,
-      "spotifyGenres": [
-        "dance pop",
-        "nu-disco"
-      ],
-      "bpm": 124,
-      "moodTags": [
-        "dancefloor",
-        "peak"
-      ],
-      "energyLevel": 8
+      "uri": "spotify:track:14VthBnru6kiREQUYAuNSL",
+      "title": "Emorio",
+      "artist": "Trinix, Fafá de Belém",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273b08625aa51db43b7c3b8869d",
+      "durationMs": 163840,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     },
     {
-      "uri": "spotify:track:mock015",
-      "title": "Blinding Lights",
-      "artist": "The Weeknd",
-      "coverUrl": "https://is1-ssl.mzstatic.com/image/thumb/Music125/v4/a6/6e/bf/a66ebf79-5008-8948-b352-a790fc87446b/19UM1IM04638.rgb.jpg/600x600bb.jpg",
-      "durationMs": 200000,
-      "spotifyGenres": [
-        "pop",
-        "synth pop"
-      ],
-      "bpm": 171,
-      "moodTags": [
-        "peak",
-        "banger"
-      ],
-      "energyLevel": 9
+      "uri": "spotify:track:3qdskG3Sc6E2OddOfyBUpt",
+      "title": "Spooky - Quinten 909 Radio Mix",
+      "artist": "Dusty Springfield, Quinten 909",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2737f0ac387287e515e024028db",
+      "durationMs": 162000,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:2KklXplRtxMsBYo474Es0w",
+      "title": "Be Mine",
+      "artist": "Ofenbach",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27344f3e3c7176d27db273ea2ae",
+      "durationMs": 161322,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:5XmyjJIWjhVaZ4IiN6a35F",
+      "title": "Mine World - Jazzy Mix",
+      "artist": "Rawling",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273afb30621da4fa6e3c70d87a5",
+      "durationMs": 164000,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:3WyQn0J2qnWXAbQTdraFzI",
+      "title": "The Sun - Klingande Remix Radio Edit",
+      "artist": "Parov Stelar, Graham Candy, Klingande",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2730281bd0c31bb85132f7677a5",
+      "durationMs": 210375,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:6U7GUjtamt2P0LcFod1dBT",
+      "title": "Mas Que Nada",
+      "artist": "Sérgio Mendes, Black Eyed Peas",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273add74c8bfe883a9e31b242fa",
+      "durationMs": 262840,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:0u5Agy2RLORlgsxZ3INSJ5",
+      "title": "Stayin' Alive VS 50 C Tik Tok - Remix",
+      "artist": "ROSE BEAT",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273270b5ea284f24bb1d9253b47",
+      "durationMs": 113341,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:45oIdGYAtr0blcqnOAX3nZ",
+      "title": "Losing You",
+      "artist": "Gizmo Varillas",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2732c7501e13545e7de44bb7ae7",
+      "durationMs": 129413,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:2fuWIFyY452wmNOoT32EB8",
+      "title": "Never Going Home",
+      "artist": "Kungs",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2736fe64a6925eacbe9462f69de",
+      "durationMs": 169946,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:4umbPzevKTowcl5kS0YZhI",
+      "title": "You've Got Me Where You Want Me",
+      "artist": "Bakermat",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2738dd954e8b3f6aeb2fd57527c",
+      "durationMs": 123164,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:3ponDZeMH4ONWpPCyfrJ5L",
+      "title": "Tainted Love",
+      "artist": "Trinix, Queen D",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273d5a82fa2257b1490987bbaed",
+      "durationMs": 184333,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:5Lm0xkrtZFYz1waA9gwqYP",
+      "title": "Got Me Like",
+      "artist": "Lavern",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27312a52342feaef1446ea516a9",
+      "durationMs": 130714,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:3Ui7cdWASapLaUp2RHym7q",
+      "title": "Soul Fever Blues",
+      "artist": "Parov Stelar, Muddy Waters",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273e7d4c12f72b10c8b45105e79",
+      "durationMs": 184550,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:4BOdCKuO8W8OwSuFdUxVop",
+      "title": "Change",
+      "artist": "Lipka",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273823f9595621015755602e304",
+      "durationMs": 182250,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:7cnS0EPwBnP9ZIdGOAOY7c",
+      "title": "Fake ID (Coke & Rum Remix)",
+      "artist": "Riton, Kah-Lo, GEE LEE",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273c5d802aba7696d7e6a5528df",
+      "durationMs": 126720,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:3hxRKXzZS0XRYGZ123JDNH",
+      "title": "Djon maya maï (feat. Victor Démé)",
+      "artist": "Synapson, Victor Démé",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27350c3671ce1b96040384db689",
+      "durationMs": 194706,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:44ahv3Zj4FOJoy8gJLZF9B",
+      "title": "Alright",
+      "artist": "Jain",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2735d927088ec8a99b6dd7ffc25",
+      "durationMs": 222401,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:1ubVPccf8Vb9mL0XYpVpCV",
+      "title": "Fade Out Lines - The Avener Rework",
+      "artist": "The Avener, Phoebe Killdeer",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273f239d3948dbbc14346a4b2bd",
+      "durationMs": 276600,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:7jLoUQCN6HeC4MNQxr0wcD",
+      "title": "Body Talk",
+      "artist": "Ofenbach, SVEA",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273025b1769a78b65c29e411492",
+      "durationMs": 139422,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:2uEQbGfDTDHJkd31VDGZky",
+      "title": "Shiva",
+      "artist": "Luke Bergs",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2736c1e519f9c089e3d7268ac4e",
+      "durationMs": 163755,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:5DQFUDNNpdu2l3ZyE8GHON",
+      "title": "Feeling Good - Austin Millz Remix",
+      "artist": "Nina Simone, Austin Millz",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273bcac5e28504bbd3af67862c7",
+      "durationMs": 150789,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:0yIFHOSjL4rJEUaKHe8hkX",
+      "title": "All That Glitters",
+      "artist": "Earl",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273972519b3362cd10f3def9c17",
+      "durationMs": 197746,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:1xzi1Jcr7mEi9K2RfzLOqS",
+      "title": "CUFF IT",
+      "artist": "Beyoncé",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27369a3c061676c2020adfe8315",
+      "durationMs": 225388,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:09W8xl18AjLeWcmPenmdcy",
+      "title": "Sunshine Prescription",
+      "artist": "Aden Foyer",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273aeae78b66653ab3135423e96",
+      "durationMs": 161142,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:1HrMWH5GUdK6Yi94rbANJA",
+      "title": "Cola",
+      "artist": "CamelPhat, Elderbrook",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2738c86b05d0cd1b9e770eae2f8",
+      "durationMs": 223869,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:6gfVJbWZWVwgxVHTLS2XOi",
+      "title": "Bye Bye (feat. Lex Empress)",
+      "artist": "Bakermat, Lex Empress",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2738dd954e8b3f6aeb2fd57527c",
+      "durationMs": 91859,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:2PspwQLfDzLUOyaxQ7de5L",
+      "title": "Ecstasy - Mixed",
+      "artist": "Fabich, Jafunk, Pastel, Bambie",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273faa94a3e4196a202daf96dd1",
+      "durationMs": 139558,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:3660k2kZKOFOFS8Cv6DkJy",
+      "title": "Daydreamer",
+      "artist": "KC Lights, Leo Stannard",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2736ba4d807c94682bf5939322c",
+      "durationMs": 160403,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:1odExI7RdWc4BT515LTAwj",
+      "title": "Daylight",
+      "artist": "David Kushner",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27395ca6a9b4083a86c149934ae",
+      "durationMs": 212953,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:0GT2hQQ6mdHeW0AZDl5NlJ",
+      "title": "Gatluak - Bakermat Remix",
+      "artist": "Kronan, Nyaruach, Bakermat",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273591c3f691cc42a0257eb0665",
+      "durationMs": 139383,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:6YYq99NU8k67nXbIJIiC4J",
+      "title": "Pastel de Nata",
+      "artist": "La Fine Equipe, oOgo",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27376e68055133b3eb9f2b8ae67",
+      "durationMs": 77464,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:00SmB7n85SKROGjybsyq5i",
+      "title": "Bongo Bong",
+      "artist": "Manu Chao",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27372c5875a8e4b49075978cd04",
+      "durationMs": 158426,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:21Yp27Z11R0V9BmutwyUUW",
+      "title": "Sewing",
+      "artist": "Trinix",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273e165373fd5829d2c58a92ee0",
+      "durationMs": 147226,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:6ExtJw7sxaExSyBs7B0Z48",
+      "title": "The Clapping Song - Kungs Remix",
+      "artist": "Mind Enterprises, Kungs",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273b6c5dd6d21f1d30e3331e8ca",
+      "durationMs": 137038,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:3PnOOmkxruDDAiMYZZTgO7",
+      "title": "Goodbye (feat. Lyse) - Radio Edit",
+      "artist": "Feder, Lyse",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273944f09035ef3ddf623261ad1",
+      "durationMs": 201938,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:4Dvkj6JhhA12EX05fT7y2e",
+      "title": "As It Was",
+      "artist": "Harry Styles",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b27382ce362511fb3d9dda6578ee",
+      "durationMs": 167303,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:6mMgULTQMHV0WJJfGoe9nT",
+      "title": "Instant Playa",
+      "artist": "Boztown",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273202dd141d541f26c203a87e9",
+      "durationMs": 101333,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:0WFryfbNKPXVtVQlz5dZ8H",
+      "title": "hotline (edit)",
+      "artist": "Billie Eilish",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b273c820a9669147be3addd7f221",
+      "durationMs": 60719,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
+    },
+    {
+      "uri": "spotify:track:6b37xrsNCWYIUphFBazqD6",
+      "title": "Me Gustas Tu",
+      "artist": "Manu Chao",
+      "coverUrl": "https://i.scdn.co/image/ab67616d0000b2731dcba4a728ca0b17cbd204a5",
+      "durationMs": 239986,
+      "spotifyGenres": [],
+      "bpm": null,
+      "moodTags": [],
+      "energyLevel": null
     }
   ]
 }

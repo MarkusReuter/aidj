@@ -6,7 +6,9 @@ Touch-only Tablet-App für Partys: Claude wählt Tracks vor, Crowd tippt auf iPa
 
 ## Heutiger Stand
 
-Phase 1 (Tablet-UI), Phase 1a (Phone-UI + UA-Routing + DJ-Mode), Phase 2 (Library-Editor + `build-library`-Skript), Phase 3 (Spotify-OAuth + Proxy), Phase 4 (Server-State + SSE-Pipeline) und Phase 4a (Gast-Queue-Server-State) sind durch. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync); Kandidaten kommen zufällig aus `data/library.json` als Stand-in für den DJ-Brain. Tablet-Tap committet direkt in die Spotify-Queue (`/api/queue/commit`, Host-Privileg); Phone-Tap geht durch die Gast-Queue (`/api/guest/submit`) mit FIFO + 1-Slot-Quota + Idempotenz. Track-Lifecycle (pending → playing → done) wird automatisch beim Spotify-Track-Wechsel gesetzt. Phase 5 (Claude-DJ-Brain + Lock-Window + echter Skip) ist **noch nicht** verdrahtet.
+Phase 1 (Tablet-UI), Phase 1a (Phone-UI + UA-Routing + DJ-Mode), Phase 2 (Library-Editor + `build-library`-Skript), Phase 3 (Spotify-OAuth + Proxy), Phase 4 (Server-State + SSE-Pipeline), Phase 4a (Gast-Queue-Server-State) und Phase 4b (In-App-Library-Build) sind durch. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync); Kandidaten kommen zufällig aus `data/library.json` als Stand-in für den DJ-Brain. Tablet-Tap committet direkt in die Spotify-Queue (`/api/queue/commit`, Host-Privileg); Phone-Tap geht durch die Gast-Queue (`/api/guest/submit`) mit FIFO + 1-Slot-Quota + Idempotenz. Track-Lifecycle (pending → playing → done) wird automatisch beim Spotify-Track-Wechsel gesetzt. `/admin` zeigt einen Spotify-Verbindungsstatus-Banner und einen Playlist-Picker, der die Library **additiv** (bestehende Tracks bleiben, neue werden angehängt) via SSE-Stream baut. Phase 5 (Claude-DJ-Brain + Lock-Window + echter Skip) ist **noch nicht** verdrahtet.
+
+**Spotify-Dev-Mode-Restrictions (2025/2026)**: Mehrere Endpoints geben für non-production-Apps 403 — `/v1/playlists/{id}/tracks` (deprecated, `/items` nutzen), `/v1/artists` (Bulk, kein Workaround außer Production-Mode). Details + Liste in PLAN.md Phase 4b → "Spotify-API-Realität". Beim Anfassen neuer Spotify-Endpoints **erst live proben**, bevor man Schemas hardcodet — und `127.0.0.1` statt `localhost` im Browser, sonst OAuth-Cookie-Mismatch.
 
 ## Liefer-Reihenfolge (wichtig)
 
@@ -37,13 +39,16 @@ Spotify-Refresh-Token wird in `~/.aidj-app/token.json` mit `chmod 0600` gespeich
 
 ```bash
 npm install
-npm run dev            # http://localhost:3000  (Root sniffed UA → /tablet oder /phone)
+npm run dev            # http://127.0.0.1:3000  (Root sniffed UA → /tablet oder /phone)
 npm run build          # Produktion (vor der Party)
 npm start              # Produktions-Server, State persistiert über Lifetime des Prozesses
 npm run build-library -- <playlist-uri> [<playlist-uri> ...]
-                       # Einmal pro Party: Library aus Spotify-Playlists bauen.
+                       # Power-User-Fallback (CLI, nur public Playlists).
+                       # Primärer Weg seit Phase 4b: /admin → "Playlists aus Spotify laden".
                        # Braucht SPOTIFY_CLIENT_ID/SECRET in .env.local; GETSONGBPM_API_KEY optional.
 ```
+
+**Browser-URL beim OAuth-Flow**: Spotify erlaubt seit Nov. 2024 kein `localhost` mehr als Redirect-URI — nur `127.0.0.1` (oder HTTPS). Konsequenz: die App im Browser über `http://127.0.0.1:3000/...` öffnen, nicht über `localhost:3000/...`, sonst Cookie-Origin-Mismatch beim OAuth-Callback. `SPOTIFY_REDIRECT_URI` muss zum eingetragenen Eintrag im Spotify-Dashboard passen.
 
 ## Codebase-Layout
 
@@ -51,11 +56,13 @@ npm run build-library -- <playlist-uri> [<playlist-uri> ...]
 app/             Root-Page (UA-Sniff → /tablet | /phone) + Layout
   tablet/        Tablet-Frontend (das, was auf dem iPad läuft)
   phone/         Phone-Frontend (Portrait, User-Mode + DJ-Mode-Hidden-Tap-Unlock)
-  admin/         Library-Editor am Mac (Mood-Tags + Energy taggen)
+  admin/         ConnectionStatus + PlaylistPicker (Build) + LibraryEditor (Tags/Energy)
   api/
     lan-url/     LAN-IP-Detection für QR-Code
-    library/     Library load/save
+    library/     Library load/save (PUT mit 409-Race-Schutz bei laufendem Build)
+                 build/{POST,[jobId]/stream} (Two-Step-SSE-Build-Pipeline)
     spotify/     OAuth (auth, callback) + Proxy (devices, select-device, queue, now-playing)
+                 + status, playlists (Phase 4b)
     state/       stream (SSE) + button (mood/playlist/anti)
     queue/       commit (Tablet-Tap → Spotify Queue + committedId, Host-Privileg)
     guest/       submit (Phone-Tap → FIFO-Gast-Queue mit 1-Slot-Quota)
@@ -63,7 +70,8 @@ components/      NowPlayingBar, NextUpCandidates, MoodSection, PlaylistModal, An
   phone/         PhoneTopBar, NowPlayingCard, HeartbeatBadge, GuestQueueList, …
 lib/             mock-data.ts (15 Mock-Tracks + Mood-Fragen)
                  library-schema.ts (Zod, Client-Safe) + library.ts (fs-Wrapper, Server-Only)
-                 spotify.ts (Token-Storage in ~/.aidj-app/ + Wrapper, Server-Only)
+                 library-build.ts (Shared Build-Logik + Job-Registry, Server-Only)
+                 spotify.ts (Token-Storage in ~/.aidj-app/ + Wrapper + Scopes, Server-Only)
                  state.ts (Party-State-Singleton + EventEmitter + 5s-Polling, Server-Only)
                  guest-queue.ts (In-Memory-FIFO + Mutex + Quota, Server-Only)
                  server-state-types.ts (SSE-Wire-Format, Client-Safe)
@@ -71,7 +79,7 @@ lib/             mock-data.ts (15 Mock-Tracks + Mood-Fragen)
                  phone/ (guest-id, guest-name, dj-mode)
                  → dj-brain.ts kommt in Phase 5
 data/            mock-covers.json, library.json (kuratierte Track-Library für DJ-Brain)
-scripts/         fetch-mock-covers.ts, build-library.ts
+scripts/         fetch-mock-covers.ts, build-library.ts (CLI-Fallback)
 public/          PWA-Manifest, Icons
 ```
 
