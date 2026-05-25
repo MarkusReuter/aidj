@@ -46,6 +46,7 @@ import {
   proposeNextCandidates,
   type ButtonLogEntry,
 } from './dj-brain';
+import { getSettings } from './settings';
 
 const POLL_INTERVAL_MS = 5_000;
 const CANDIDATE_COUNT = 4;
@@ -57,6 +58,15 @@ const LOCK_WINDOW_MS = 10_000;
 const BUTTON_LOG_MAX = 200;
 /** History-Größe für DJ-Brain (letzte gespielte Tracks). */
 const HISTORY_MAX = 10;
+/**
+ * Wenn der Cooldown-Filter so hart greift, dass weniger als das übrig bleibt,
+ * lassen wir ihn für diesen Pick fallen (nur currentUri excluden). Verhindert,
+ * dass der Brain bei kleinen Libraries oder zu langem Cooldown nichts mehr
+ * findet.
+ */
+const MIN_POOL_AFTER_COOLDOWN = 6;
+/** `playedAt`-Einträge älter als das werden beim nächsten Track-Wechsel weggeräumt. */
+const PLAYED_AT_GC_MS = 12 * 60 * 60 * 1000;
 
 type InternalState = {
   spotifyConnected: boolean;
@@ -81,6 +91,8 @@ type InternalState = {
   lastTrackUri: string | null;
   /** Letzte HISTORY_MAX URIs (neueste zuletzt). */
   history: string[];
+  /** URI → wall-clock-ms des letzten Play-Endes. Für den Cooldown-Filter. */
+  playedAt: Record<string, number>;
   /** Wall-clock-Zeit des ersten Tracks der Session (für LLM-Energie-Curve-Hint). */
   partyStartedAt: number;
   /** Rolling Log der Button-Klicks für recency-weighted Aggregation. */
@@ -89,35 +101,69 @@ type InternalState = {
   lastBrain: SnapshotBrainStatus | null;
 };
 
-const state: InternalState = {
-  spotifyConnected: false,
-  activeDeviceId: null,
-  deviceName: null,
-  nowPlaying: null,
-  pollAt: Date.now(),
-  candidates: [],
-  candidateReasonings: {},
-  committedId: null,
-  lockedTrackUri: null,
-  moodCounts: {},
-  moodQuestionIdx: 0,
-  tracksUntilMoodSwitch: TRACKS_PER_MOOD_QUESTION,
-  customMoodQuestion: null,
-  activePlaylists: new Set<string>(),
-  lastTrackUri: null,
-  history: [],
-  partyStartedAt: Date.now(),
-  buttonLog: [],
-  lastBrain: null,
+/**
+ * Dev-HMR-Survival: Next.js dev-server reloaded dieses Modul bei jedem Fast
+ * Refresh, was sonst `state` und `emitter` resettet. Bestehende SSE-Streams
+ * hingen am alten Emitter → Tablet rendert stale candidates, POSTs treffen
+ * fresh state → 409 not_a_candidate. Lösung: alles unter einem Symbol auf
+ * globalThis stashen, damit das Singleton den Reload überlebt.
+ *
+ * Production (`next start`) reloaded nichts — der globalThis-Indirect kostet
+ * dort nichts.
+ */
+type GlobalStash = {
+  state: InternalState;
+  emitter: EventEmitter;
+  subscriberCount: number;
+  pollTimer: NodeJS.Timeout | null;
+  libraryCache: LibraryTrack[] | null;
+  recomputeInFlight: boolean;
+  recomputeQueued: boolean;
 };
+const GLOBAL_KEY = '__aidj_state_singleton__';
+type GlobalWithStash = typeof globalThis & {
+  [GLOBAL_KEY]?: GlobalStash;
+};
+const g = globalThis as GlobalWithStash;
 
-const emitter = new EventEmitter();
-// In Theorie unbegrenzt; bei vielen Tablets schreit Node sonst.
-emitter.setMaxListeners(50);
+if (!g[GLOBAL_KEY]) {
+  const newEmitter = new EventEmitter();
+  newEmitter.setMaxListeners(50);
+  g[GLOBAL_KEY] = {
+    state: {
+      spotifyConnected: false,
+      activeDeviceId: null,
+      deviceName: null,
+      nowPlaying: null,
+      pollAt: Date.now(),
+      candidates: [],
+      candidateReasonings: {},
+      committedId: null,
+      lockedTrackUri: null,
+      moodCounts: {},
+      moodQuestionIdx: 0,
+      tracksUntilMoodSwitch: TRACKS_PER_MOOD_QUESTION,
+      customMoodQuestion: null,
+      activePlaylists: new Set<string>(),
+      lastTrackUri: null,
+      history: [],
+      playedAt: {},
+      partyStartedAt: Date.now(),
+      buttonLog: [],
+      lastBrain: null,
+    },
+    emitter: newEmitter,
+    subscriberCount: 0,
+    pollTimer: null,
+    libraryCache: null,
+    recomputeInFlight: false,
+    recomputeQueued: false,
+  };
+}
 
-let subscriberCount = 0;
-let pollTimer: NodeJS.Timeout | null = null;
-let libraryCache: LibraryTrack[] | null = null;
+const stash = g[GLOBAL_KEY]!;
+const state: InternalState = stash.state;
+const emitter: EventEmitter = stash.emitter;
 
 function libraryToSnapshotTrack(t: LibraryTrack): SnapshotTrack {
   return {
@@ -151,10 +197,10 @@ function spotifyNowPlayingToTrack(
 }
 
 async function getLibrary(): Promise<LibraryTrack[]> {
-  if (libraryCache) return libraryCache;
+  if (stash.libraryCache) return stash.libraryCache;
   const lib = await loadLibrary();
-  libraryCache = lib.tracks;
-  return libraryCache;
+  stash.libraryCache = lib.tracks;
+  return stash.libraryCache;
 }
 
 /**
@@ -163,7 +209,7 @@ async function getLibrary(): Promise<LibraryTrack[]> {
  * aber als Hook für Phase 6.
  */
 export function invalidateLibraryCache(): void {
-  libraryCache = null;
+  stash.libraryCache = null;
 }
 
 /**
@@ -190,9 +236,33 @@ async function pickCandidatesViaBrain(
     const augmentedHistory = extraExcludeUris.length > 0
       ? [...history, ...extraExcludeUris]
       : history;
+
+    // Cooldown anwenden: Tracks, die innerhalb des Fensters liefen, raus aus
+    // dem Pool. Sicherheitsnetz: wenn der Filter zu hart greift (Mini-Library
+    // oder gerade alle gespielt), für diesen Pick soft-skippen, sonst kriegt
+    // der Brain einen leeren Pool und Plan-2-Lock-Window failt.
+    const settings = await getSettings();
+    const cooldownMs = settings.cooldownMinutes * 60_000;
+    let filteredLibrary = library;
+    if (cooldownMs > 0) {
+      const now = Date.now();
+      const blocked = new Set<string>();
+      for (const [uri, ts] of Object.entries(state.playedAt)) {
+        if (now - ts < cooldownMs) blocked.add(uri);
+      }
+      const candidate = library.filter((t) => !blocked.has(t.uri));
+      if (candidate.length >= MIN_POOL_AFTER_COOLDOWN) {
+        filteredLibrary = candidate;
+      } else {
+        console.warn(
+          `[state] cooldown filter would leave only ${candidate.length} tracks — skipping cooldown for this pick`,
+        );
+      }
+    }
+
     const result = await proposeNextCandidates(
       {
-        library,
+        library: filteredLibrary,
         currentTrackUri: currentUri,
         history: augmentedHistory,
         activePlaylists: [...state.activePlaylists],
@@ -249,7 +319,7 @@ async function pickCandidatesViaBrain(
  * der Track dort kuratiert ist — sonst defaulten wir.
  */
 function guestEntryToCandidate(entry: GuestEntry): SnapshotTrack {
-  const enriched = libraryCache?.find((t) => t.uri === entry.trackUri);
+  const enriched = stash.libraryCache?.find((t) => t.uri === entry.trackUri);
   return {
     id: entry.trackUri,
     title: entry.trackMeta.title,
@@ -281,18 +351,15 @@ function guestEntryToCandidate(entry: GuestEntry): SnapshotTrack {
  * via `recomputeInFlight`/`recomputeQueued` serialisiert; während ein Run
  * läuft, vermerken weitere Aufrufe nur einen Re-Run-Wunsch.
  */
-let recomputeInFlight = false;
-let recomputeQueued = false;
-
 async function recomputeCandidates(currentUri: string | null): Promise<void> {
-  if (recomputeInFlight) {
-    recomputeQueued = true;
+  if (stash.recomputeInFlight) {
+    stash.recomputeQueued = true;
     return;
   }
-  recomputeInFlight = true;
+  stash.recomputeInFlight = true;
   try {
     do {
-      recomputeQueued = false;
+      stash.recomputeQueued = false;
       const guestSlots = listActiveGuests()
         .filter((e) => e.status === 'pending')
         .slice(0, CANDIDATE_COUNT);
@@ -335,9 +402,9 @@ async function recomputeCandidates(currentUri: string | null): Promise<void> {
         state.committedId =
           guestCandidates[0]?.id ?? newCandidates[0]?.id ?? null;
       }
-    } while (recomputeQueued);
+    } while (stash.recomputeQueued);
   } finally {
-    recomputeInFlight = false;
+    stash.recomputeInFlight = false;
   }
 }
 
@@ -352,7 +419,7 @@ function buildSnapshot(): StateSnapshot {
   const mq = currentMoodQuestion();
   let track: SnapshotTrack | null = null;
   if (np) {
-    const enriched = libraryCache?.find((t) => t.uri === np.track.uri);
+    const enriched = stash.libraryCache?.find((t) => t.uri === np.track.uri);
     track = spotifyNowPlayingToTrack(np, enriched);
   }
   return {
@@ -432,6 +499,13 @@ async function poll(): Promise<void> {
         if (state.history.length > HISTORY_MAX * 2) {
           state.history = state.history.slice(-HISTORY_MAX);
         }
+        // Cooldown-Timestamp: jetzt ist der Track "fertig gespielt".
+        state.playedAt[state.lastTrackUri] = Date.now();
+        // GC bei Gelegenheit — verhindert unbounded growth bei stundenlangen Sessions.
+        const cutoff = Date.now() - PLAYED_AT_GC_MS;
+        for (const uri of Object.keys(state.playedAt)) {
+          if (state.playedAt[uri]! < cutoff) delete state.playedAt[uri];
+        }
       }
       // Plan2: Wenn der jetzt laufende Track ein pending Gast-Wunsch ist
       // (Lock-Window hat ihn gerade gepuscht), direkt als `done` markieren —
@@ -490,18 +564,18 @@ async function poll(): Promise<void> {
 }
 
 function startPolling(): void {
-  if (pollTimer) return;
+  if (stash.pollTimer) return;
   // Erster Poll sofort, damit der erste Subscriber nicht 5 s leeren State sieht.
   void poll();
-  pollTimer = setInterval(() => {
+  stash.pollTimer = setInterval(() => {
     void poll();
   }, POLL_INTERVAL_MS);
 }
 
 function stopPolling(): void {
-  if (!pollTimer) return;
-  clearInterval(pollTimer);
-  pollTimer = null;
+  if (!stash.pollTimer) return;
+  clearInterval(stash.pollTimer);
+  stash.pollTimer = null;
 }
 
 export type SnapshotHandler = (snapshot: StateSnapshot) => void;
@@ -517,8 +591,8 @@ export function subscribe(handler: SnapshotHandler): {
   initialSnapshot: StateSnapshot;
 } {
   emitter.on('snapshot', handler);
-  subscriberCount += 1;
-  if (subscriberCount === 1) {
+  stash.subscriberCount += 1;
+  if (stash.subscriberCount === 1) {
     startPolling();
   }
   const initial = buildSnapshot();
@@ -529,8 +603,8 @@ export function subscribe(handler: SnapshotHandler): {
       if (!active) return;
       active = false;
       emitter.off('snapshot', handler);
-      subscriberCount = Math.max(0, subscriberCount - 1);
-      if (subscriberCount === 0) {
+      stash.subscriberCount = Math.max(0, stash.subscriberCount - 1);
+      if (stash.subscriberCount === 0) {
         stopPolling();
       }
     },

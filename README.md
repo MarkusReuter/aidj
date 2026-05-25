@@ -11,7 +11,7 @@ Reifegrad: **end-to-end spielbar** — Tablet/Phone zeigen echten Spotify-Track,
 - ✅ Tablet-UI (Landscape, 4 Kandidaten-Karten, Mood-Buttons, Playlist-Toggles, Anti-Buttons)
 - ✅ Phone-UI (Portrait, Track-Suche, Gast-Queue, Hidden-DJ-Mode via 10× Tap aufs Logo)
 - ✅ UA-Routing auf `/` (Phone → `/phone`, sonst → `/tablet`)
-- ✅ Library-Editor + Playlist-Picker unter `/admin` (Mood-Tags + Energy manuell taggen oder via LLM auto-taggen, Library additiv aus Spotify-Playlists bauen)
+- ✅ Library-Editor + Playlist-Picker + Cooldown-Slider unter `/admin` (Mood-Tags + Genres + Energy manuell taggen oder via LLM auto-taggen mit Live-Progress-Stream, Library additiv aus Spotify-Playlists bauen)
 - ✅ `build-library`-Skript als Power-User-Fallback (Spotify-Playlists → `data/library.json` + BPM via GetSongBPM)
 - ✅ Spotify-OAuth-Flow + API-Proxy (Queue, Now-Playing, Devices, Transfer-Playback, Search)
 - ✅ SSE-Pipeline + Server-State (Multi-Client-Sync, Spotify-Polling, Mood/Playlist serverseitig)
@@ -132,7 +132,23 @@ Schreibt `data/library.json` mit Track-Metadaten + Spotify-Genre-Tags. BPM wird 
 
 Beim Re-Build bleiben deine manuell gesetzten `moodTags` und `energyLevel` pro Track-URI erhalten — Editor-Arbeit geht nicht verloren.
 
-GetSongBPM-Key kostenlos beantragen: https://getsongbpm.com/api (Backlink-Pflicht auf deiner Seite, für Privatnutzung egal).
+**GetSongBPM-Key kostenlos beantragen** — Anleitung:
+
+1. https://getsongbpm.com/api öffnen.
+2. Das Formular oben links (auf Mobile: oben) ausfüllen — Email + die URL deiner Seite, auf der du den Pflicht-Backlink hostest. Eigene Domain, GitHub-Pages-URL, Repo-README auf GitHub, persönliches Blog — alles geht, solange die URL öffentlich erreichbar ist und den Backlink wirklich enthält.
+3. Vor dem Absenden: **Backlink auf der angegebenen Seite einbauen**. Beispiel-Snippet (sie crawlen die URL beim Approval):
+
+   ```html
+   <a href="https://getsongbpm.com">Powered by GetSongBPM.com</a>
+   ```
+
+4. Approval kommt per Mail, meist binnen Minuten bis Stunden. Key danach in `.env.local`:
+
+   ```
+   GETSONGBPM_API_KEY=<dein-key>
+   ```
+
+**Wichtig**: Der Backlink ist auch für rein private/Dev-Nutzung Pflicht — der Service spricht das explizit aus und sperrt Keys kommentarlos, wenn der Backlink später verschwindet. Wenn du nichts Öffentliches hosten willst, lass den Key leer; das DJ-Brain ignoriert dann BPM-Bedingungen ganz, alles andere funktioniert.
 
 ### 6. Tracks taggen
 
@@ -141,14 +157,16 @@ npm run dev
 # Browser: http://localhost:3000/admin
 ```
 
-Pro Track Mood-Tags (warm-up, peak, banger, feelgood, …) und Energy-Level (1–10) setzen.
+Pro Track werden drei Achsen vergeben: **Mood-Tags** (z. B. `warm-up`, `peak`, `banger`, `feelgood`, `melancholic`, `dancefloor`, `chill` — oder eigene Begriffe; alles free-form), **Genres** (z. B. `house`, `techno`, `indie-pop`, `hip-hop`) und **Energy-Level** (1–10). Mood-Tags und Genres sind kein hardcoded Enum — du oder das LLM erfindet das Vokabular selbst, Normalisierung passiert über `trim().toLowerCase()`.
 
 **Zwei Wege:**
 
-- **🪄 Auto-Tag-Button** (im LibraryEditor oben): wenn du Schritt 7 schon erledigt hast (LLM-Key gesetzt), schlägt der LLM für alle ungetaggten Tracks Mood-Tags + Energy vor. Du reviewst die Vorschläge im Editor und klickst dann "Speichern" — bis dahin ist nichts persistiert, du kannst einzelne Tracks noch korrigieren. Spart bei 100–300 Tracks Stunden Hand-Arbeit.
-- **Manuell**: pro Track Pills toggeln + Slider ziehen. Wenn du mit dem LLM-Ergebnis nicht zufrieden bist oder es feinjustieren willst.
+- **🪄 Auto-Tag-Button** (im LibraryEditor oben): wenn du Schritt 7 schon erledigt hast (LLM-Key gesetzt), tagged das LLM alle ungetaggten Tracks. Es vergibt **Mood-Tags, Genres und Energy** selbst — bei den Genres ein gefundener Ersatz für Spotifys `/v1/artists` (das im Dev-Mode 403'ed). Der Vocabulary-Hint im Prompt zeigt dem Modell die Top-30 bisher vergebener Tags + Genres, damit es konsistente Begriffe wiederverwendet statt jedes Mal Synonyme zu erfinden. Bei großen Libraries (~2000 Tracks) läuft das Tagging mit Concurrency 10 in ~1–2 min durch; Progress-Bar + Live-Patch siehst du im Editor, Tags erscheinen pro Batch in der Tabelle. Nichts ist persistiert bis du "Speichern" klickst — review + korrigieren möglich.
+- **Manuell**: pro Track Tag-Chips mit dem Text-Input dahinter ergänzen (Enter/Komma fügt hinzu, Backspace im leeren Feld entfernt den letzten), Genre-Spalte funktioniert analog, Slider für Energy.
 
-Tagging spart dir nicht extrem viel — der LLM kommt auch ohne Tags klar (er nutzt dann `spotifyGenres` + BPM als Backup) — aber gibt ihm zusätzliches Signal für sauberere Übergänge und macht den Heuristik-Fallback (ohne LLM-Key) erst wirklich brauchbar.
+Tagging spart dir nicht extrem viel — der LLM kommt auch ohne Tags klar (er nutzt dann Titel + Artist + BPM als Backup) — aber gibt ihm zusätzliches Signal für sauberere Übergänge und macht den Heuristik-Fallback (ohne LLM-Key) erst wirklich brauchbar.
+
+**Cooldown einstellen:** Über dem LibraryEditor liegt der **Track-Cooldown-Slider** (default 2 h). Tracks, die innerhalb des Fensters liefen, werden vom DJ-Brain für neue Picks gesperrt — verhindert „derselbe Banger 3× in einer Nacht". Gast-Wünsche umgehen den Filter (Gast soll sein Lied kriegen). Bei kleinen Libraries auf 30–60 min runter; auf 0 = aus. Wird in `~/.aidj-app/settings.json` persistiert, überlebt Restarts.
 
 ### 7. DJ-Brain aktivieren (LLM-Key setzen)
 

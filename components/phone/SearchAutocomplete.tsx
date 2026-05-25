@@ -14,8 +14,15 @@ export type SearchResult = {
 type Props = {
   searchFn: (query: string) => Promise<SearchResult[]>;
   onPick: (result: SearchResult) => void;
-  disabled?: boolean;
-  disabledHint?: string;
+  /**
+   * Wenn true: Input + Treffer + Selektion bleiben aktiv, **nur** der Submit-CTA
+   * ist gesperrt. Der Gast kann in Ruhe einen nächsten Track stagen, während
+   * sein aktueller noch in der Queue ist. Sobald der eigene Slot frei wird
+   * (Track-Wechsel), wird der CTA klickbar und der gestagte Pick bleibt.
+   */
+  submitDisabled?: boolean;
+  /** Erklärungstext am gesperrten CTA. */
+  submitDisabledHint?: string;
 };
 
 const DEBOUNCE_MS = 250;
@@ -24,8 +31,8 @@ const MAX_RESULTS = 8;
 export default function SearchAutocomplete({
   searchFn,
   onPick,
-  disabled = false,
-  disabledHint,
+  submitDisabled = false,
+  submitDisabledHint,
 }: Props) {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState<SearchResult[]>([]);
@@ -74,21 +81,16 @@ export default function SearchAutocomplete({
           spellCheck={false}
           placeholder="🔍 Track oder Künstler suchen…"
           value={query}
-          disabled={disabled}
           onChange={(e) => {
             setQuery(e.target.value);
             setSelected(null);
           }}
-          className="w-full select-text rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-base text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500 disabled:opacity-50"
+          className="w-full select-text rounded-xl border border-zinc-700 bg-zinc-950 px-4 py-3 text-base text-zinc-100 placeholder-zinc-500 outline-none focus:border-purple-500"
           style={{ WebkitUserSelect: 'text', userSelect: 'text', fontSize: '16px' }}
         />
       </div>
 
-      {disabled && disabledHint && (
-        <p className="text-xs text-zinc-500">{disabledHint}</p>
-      )}
-
-      {!disabled && results.length > 0 && (
+      {results.length > 0 && (
         <ul className="flex flex-col gap-1">
           {results.map((r) => {
             const isPicked = selected?.id === r.id;
@@ -139,24 +141,39 @@ export default function SearchAutocomplete({
         </ul>
       )}
 
-      {!disabled && query.trim().length > 0 && results.length === 0 && !pending && (
+      {query.trim().length > 0 && results.length === 0 && !pending && (
         <p className="text-xs text-zinc-500">Keine Treffer für "{query}".</p>
       )}
 
-      {selected && !disabled && (
+      {selected && (
         <button
           type="button"
-          onClick={() => {
-            onPick(selected);
-            setQuery('');
-            setResults([]);
-            setSelected(null);
-          }}
+          onClick={
+            submitDisabled
+              ? undefined
+              : () => {
+                  onPick(selected);
+                  setQuery('');
+                  setResults([]);
+                  setSelected(null);
+                }
+          }
+          disabled={submitDisabled}
           style={{ touchAction: 'manipulation' }}
-          className="rounded-xl bg-gradient-to-r from-purple-500 to-pink-500 px-4 py-3 text-base font-bold text-white shadow-lg active:scale-[0.98]"
+          className={[
+            'rounded-xl px-4 py-3 text-base font-bold shadow-lg transition-colors',
+            submitDisabled
+              ? 'cursor-not-allowed bg-zinc-800 text-zinc-400'
+              : 'bg-gradient-to-r from-purple-500 to-pink-500 text-white active:scale-[0.98]',
+          ].join(' ')}
         >
-          ▶ "{selected.title}" wählen
+          {submitDisabled
+            ? `🕒 "${selected.title}" — wartet auf nächsten Track`
+            : `▶ "${selected.title}" hinzufügen`}
         </button>
+      )}
+      {selected && submitDisabled && submitDisabledHint && (
+        <p className="text-xs text-zinc-500">{submitDisabledHint}</p>
       )}
     </section>
   );

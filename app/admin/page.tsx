@@ -7,6 +7,7 @@ import {
 } from '@/lib/spotify';
 import BrainStatus from './BrainStatus';
 import ConnectionStatus from './ConnectionStatus';
+import CooldownSetting from './CooldownSetting';
 import LibraryEditor from './LibraryEditor';
 import PlaylistPicker from './PlaylistPicker';
 
@@ -58,6 +59,7 @@ export default async function AdminPage() {
     <main className="mx-auto max-w-7xl p-6">
       <ConnectionStatus status={spotifyStatus} />
       <BrainStatus />
+      <CooldownSetting />
       {spotifyStatus.connected && spotifyStatus.hasPlaylistScope && (
         <PlaylistPicker />
       )}

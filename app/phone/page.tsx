@@ -103,6 +103,10 @@ export default function PhonePage() {
 
   const handleSearchPick = useCallback(
     async (result: SearchResult) => {
+      // Submit-CTA ist in der SearchAutocomplete bei aktivem Slot bereits
+      // gegated — wenn wir hier landen, ist der Slot garantiert frei.
+      // Defensive Re-Check trotzdem, falls zwischen SSE-Snapshot und Tap eine
+      // Race entsteht.
       if (mySubmission) return;
       await submitGuestTrack(result.id, {
         title: result.title,
@@ -180,9 +184,11 @@ export default function PhonePage() {
       <SearchAutocomplete
         searchFn={liveSearch}
         onPick={handleSearchPick}
-        disabled={Boolean(mySubmission)}
-        disabledHint={
-          mySubmission ? 'Du hast schon einen Track in der Queue.' : undefined
+        submitDisabled={Boolean(mySubmission)}
+        submitDisabledHint={
+          mySubmission
+            ? 'Wird hinzufügbar, sobald dein aktueller Track gespielt wurde.'
+            : undefined
         }
       />
 

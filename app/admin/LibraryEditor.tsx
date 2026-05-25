@@ -1,12 +1,7 @@
 'use client';
 
 import { useCallback, useMemo, useState } from 'react';
-import {
-  MOOD_TAGS,
-  type Library,
-  type LibraryTrack,
-  type MoodTag,
-} from '@/lib/library-schema';
+import type { Library, LibraryTrack } from '@/lib/library-schema';
 
 type SaveState =
   | { kind: 'idle' }
@@ -16,7 +11,13 @@ type SaveState =
 
 type AutoTagState =
   | { kind: 'idle' }
-  | { kind: 'running'; requested: number }
+  | {
+      kind: 'running';
+      requested: number;
+      taggedTotal: number;
+      batchIndex: number;
+      totalBatches: number;
+    }
   | {
       kind: 'done';
       tagged: number;
@@ -25,6 +26,70 @@ type AutoTagState =
       at: number;
     }
   | { kind: 'error'; message: string };
+
+type AutoTagSuggestion = {
+  uri: string;
+  moodTags: string[];
+  genres: string[];
+  energyLevel: number;
+};
+
+type ProgressEvent = {
+  batchIndex: number;
+  batchesCompleted: number;
+  totalBatches: number;
+  batchSize: number;
+  taggedInBatch: number;
+  taggedTotal: number;
+  totalTracks: number;
+  tagged: AutoTagSuggestion[];
+  error: string | null;
+};
+
+type DoneEvent = {
+  provider: string;
+  latencyMs: number;
+  requested: number;
+  taggedTotal: number;
+  errors: string[];
+};
+
+type ErrorEvent = { error: string; message: string };
+
+/**
+ * Sehr minimaler SSE-Frame-Parser. Hält einen rolling buffer und gibt jede
+ * vollständige `event:\ndata:\n\n`-Sequenz an den callback weiter. Reicht für
+ * unseren eigenen Stream — keine multi-line data, kein retry-Feld, keine IDs.
+ */
+function makeSseParser(
+  onEvent: (event: string, data: string) => void,
+): (chunk: string) => void {
+  let buffer = '';
+  return (chunk: string) => {
+    buffer += chunk;
+    let sepIdx: number;
+    while ((sepIdx = buffer.indexOf('\n\n')) !== -1) {
+      const frame = buffer.slice(0, sepIdx);
+      buffer = buffer.slice(sepIdx + 2);
+      let event = 'message';
+      const dataLines: string[] = [];
+      for (const line of frame.split('\n')) {
+        if (line.startsWith('event:')) event = line.slice(6).trim();
+        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+      }
+      if (dataLines.length > 0) onEvent(event, dataLines.join('\n'));
+    }
+  };
+}
+
+/**
+ * Tag-Normalisierung muss zum Schema in `lib/library-schema.ts` passen
+ * (`.trim().toLowerCase()`), sonst zeigt das UI „Peak" während der Server
+ * den Tag als „peak" speichert und Re-Renders flackern.
+ */
+function normalizeTag(s: string): string {
+  return s.trim().toLowerCase();
+}
 
 function isUntagged(t: LibraryTrack): boolean {
   return t.moodTags.length === 0 && t.energyLevel === null;
@@ -69,6 +134,22 @@ export default function LibraryEditor({ initialLibrary }: Props) {
     [tracks],
   );
 
+  // Library-weites Vokabular für Autocomplete + Datalist-Suggestions. So sieht
+  // der Host beim Tippen, welche Tags er schon mal vergeben hat, und kann
+  // einfach wiederverwenden statt Synonyme zu erfinden.
+  const { moodVocab, genreVocab } = useMemo(() => {
+    const m = new Set<string>();
+    const g = new Set<string>();
+    for (const t of tracks) {
+      for (const tag of t.moodTags) m.add(tag);
+      for (const gn of t.spotifyGenres) g.add(gn);
+    }
+    return {
+      moodVocab: [...m].sort(),
+      genreVocab: [...g].sort(),
+    };
+  }, [tracks]);
+
   const updateTrack = useCallback(
     (uri: string, patch: Partial<LibraryTrack>) => {
       setTracks((prev) =>
@@ -78,23 +159,47 @@ export default function LibraryEditor({ initialLibrary }: Props) {
     [],
   );
 
-  const toggleMood = useCallback(
-    (uri: string, tag: MoodTag) => {
-      setTracks((prev) =>
-        prev.map((t) => {
-          if (t.uri !== uri) return t;
-          const has = t.moodTags.includes(tag);
-          return {
-            ...t,
-            moodTags: has
-              ? t.moodTags.filter((m) => m !== tag)
-              : [...t.moodTags, tag],
-          };
-        }),
-      );
-    },
-    [],
-  );
+  const addMoodTag = useCallback((uri: string, raw: string) => {
+    const tag = normalizeTag(raw);
+    if (!tag) return;
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.uri !== uri) return t;
+        if (t.moodTags.includes(tag)) return t;
+        return { ...t, moodTags: [...t.moodTags, tag] };
+      }),
+    );
+  }, []);
+
+  const removeMoodTag = useCallback((uri: string, tag: string) => {
+    setTracks((prev) =>
+      prev.map((t) =>
+        t.uri === uri ? { ...t, moodTags: t.moodTags.filter((m) => m !== tag) } : t,
+      ),
+    );
+  }, []);
+
+  const addGenre = useCallback((uri: string, raw: string) => {
+    const g = normalizeTag(raw);
+    if (!g) return;
+    setTracks((prev) =>
+      prev.map((t) => {
+        if (t.uri !== uri) return t;
+        if (t.spotifyGenres.includes(g)) return t;
+        return { ...t, spotifyGenres: [...t.spotifyGenres, g] };
+      }),
+    );
+  }, []);
+
+  const removeGenre = useCallback((uri: string, g: string) => {
+    setTracks((prev) =>
+      prev.map((t) =>
+        t.uri === uri
+          ? { ...t, spotifyGenres: t.spotifyGenres.filter((x) => x !== g) }
+          : t,
+      ),
+    );
+  }, []);
 
   const removeTrack = useCallback((uri: string) => {
     setTracks((prev) => prev.filter((t) => t.uri !== uri));
@@ -111,45 +216,104 @@ export default function LibraryEditor({ initialLibrary }: Props) {
 
   const onAutoTag = useCallback(async () => {
     if (untaggedUris.length === 0 || autoTagState.kind === 'running') return;
-    setAutoTagState({ kind: 'running', requested: untaggedUris.length });
+    const requested = untaggedUris.length;
+    setAutoTagState({
+      kind: 'running',
+      requested,
+      taggedTotal: 0,
+      batchIndex: 0,
+      totalBatches: 0,
+    });
+
+    /**
+     * Live-Patch eines Batches in den Editor-State. Tracks kriegen pro Batch
+     * direkt Tags + Genres + Energy gesetzt, damit der Host beim Scrollen sieht
+     * was bisher gemacht wurde. Persistiert wird erst beim "Speichern".
+     */
+    const applyBatch = (sugs: AutoTagSuggestion[]) => {
+      if (sugs.length === 0) return;
+      const patches = new Map(sugs.map((t) => [t.uri, t]));
+      setTracks((prev) =>
+        prev.map((t) => {
+          const sug = patches.get(t.uri);
+          if (!sug) return t;
+          const mergedGenres = [
+            ...t.spotifyGenres,
+            ...sug.genres.filter((g) => !t.spotifyGenres.includes(g)),
+          ];
+          return {
+            ...t,
+            moodTags: sug.moodTags,
+            energyLevel: sug.energyLevel,
+            spotifyGenres: mergedGenres,
+          };
+        }),
+      );
+    };
+
+    let terminal: 'done' | 'error' | null = null;
+
     try {
       const res = await fetch('/api/library/auto-tag', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ uris: untaggedUris }),
       });
-      const body = (await res.json().catch(() => ({}))) as {
-        tagged?: { uri: string; moodTags: MoodTag[]; energyLevel: number }[];
-        errors?: string[];
-        message?: string;
-        requested?: number;
-      };
-      if (!res.ok) {
+      if (!res.ok || !res.body) {
         setAutoTagState({
           kind: 'error',
-          message: body.message ?? `HTTP ${res.status}`,
+          message: `HTTP ${res.status}`,
         });
         return;
       }
-      const tagged = body.tagged ?? [];
-      // Suggestions in den lokalen State patchen — User muss "Speichern" klicken
-      // damit es persistiert wird. So bleibt Auto-Tagging reviewable + undo-bar.
-      const patches = new Map(
-        tagged.map((t) => [t.uri, { moodTags: t.moodTags, energyLevel: t.energyLevel }]),
-      );
-      setTracks((prev) =>
-        prev.map((t) => {
-          const patch = patches.get(t.uri);
-          return patch ? { ...t, ...patch } : t;
-        }),
-      );
-      setAutoTagState({
-        kind: 'done',
-        tagged: tagged.length,
-        requested: body.requested ?? untaggedUris.length,
-        errors: body.errors ?? [],
-        at: Date.now(),
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      const parse = makeSseParser((event, data) => {
+        try {
+          if (event === 'progress') {
+            const ev = JSON.parse(data) as ProgressEvent;
+            applyBatch(ev.tagged);
+            setAutoTagState({
+              kind: 'running',
+              requested,
+              taggedTotal: ev.taggedTotal,
+              // batchesCompleted ist monoton, batchIndex ist die Slice-Position
+              // und kommt bei Concurrency >1 out-of-order — Counter würde springen.
+              batchIndex: ev.batchesCompleted,
+              totalBatches: ev.totalBatches,
+            });
+          } else if (event === 'done') {
+            const ev = JSON.parse(data) as DoneEvent;
+            setAutoTagState({
+              kind: 'done',
+              tagged: ev.taggedTotal,
+              requested: ev.requested,
+              errors: ev.errors,
+              at: Date.now(),
+            });
+            terminal = 'done';
+          } else if (event === 'error') {
+            const ev = JSON.parse(data) as ErrorEvent;
+            setAutoTagState({ kind: 'error', message: ev.message });
+            terminal = 'error';
+          }
+        } catch (parseErr) {
+          console.warn('[auto-tag] parse error', parseErr, data);
+        }
       });
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        const { value, done } = await reader.read();
+        if (value) parse(decoder.decode(value, { stream: true }));
+        if (done) break;
+      }
+      // Server hat Stream geschlossen, ohne 'done' oder 'error' zu schicken.
+      if (!terminal) {
+        setAutoTagState({
+          kind: 'error',
+          message: 'Stream unerwartet beendet',
+        });
+      }
     } catch (err) {
       setAutoTagState({
         kind: 'error',
@@ -233,7 +397,7 @@ export default function LibraryEditor({ initialLibrary }: Props) {
               />
             )}
             {autoTagState.kind === 'running'
-              ? `Tagge…`
+              ? `Tagge ${autoTagState.taggedTotal}/${autoTagState.requested}…`
               : `🪄 Auto-Tag (${untaggedUris.length})`}
           </button>
           <button
@@ -262,6 +426,17 @@ export default function LibraryEditor({ initialLibrary }: Props) {
         </div>
       </header>
 
+      <datalist id="library-mood-vocab">
+        {moodVocab.map((tag) => (
+          <option key={tag} value={tag} />
+        ))}
+      </datalist>
+      <datalist id="library-genre-vocab">
+        {genreVocab.map((g) => (
+          <option key={g} value={g} />
+        ))}
+      </datalist>
+
       <div className="overflow-x-auto rounded-md border border-zinc-800">
         <table className="w-full border-collapse text-sm">
           <thead className="bg-zinc-900 text-left text-xs uppercase tracking-wider text-zinc-400">
@@ -270,7 +445,7 @@ export default function LibraryEditor({ initialLibrary }: Props) {
               <th className="px-3 py-2">Title / Artist</th>
               <th className="px-3 py-2">Dauer</th>
               <th className="px-3 py-2">BPM</th>
-              <th className="px-3 py-2">Spotify-Genres</th>
+              <th className="px-3 py-2">Genres</th>
               <th className="px-3 py-2">Mood-Tags</th>
               <th className="px-3 py-2">Energy</th>
               <th className="px-3 py-2">
@@ -283,7 +458,10 @@ export default function LibraryEditor({ initialLibrary }: Props) {
               <TrackRow
                 key={track.uri}
                 track={track}
-                onToggleMood={toggleMood}
+                onAddMood={addMoodTag}
+                onRemoveMood={removeMoodTag}
+                onAddGenre={addGenre}
+                onRemoveGenre={removeGenre}
                 onUpdate={updateTrack}
                 onRemove={removeTrack}
               />
@@ -347,10 +525,29 @@ function SaveStatusBadge({
 function AutoTagStatusBadge({ state }: { state: AutoTagState }) {
   if (state.kind === 'idle') return null;
   if (state.kind === 'running') {
+    const pct =
+      state.totalBatches > 0
+        ? Math.round((state.batchIndex / state.totalBatches) * 100)
+        : 0;
     return (
-      <span className="text-xs text-sky-300">
-        Auto-Tag läuft… ({state.requested} Track{state.requested === 1 ? '' : 's'})
-      </span>
+      <div className="flex flex-col gap-1">
+        <span className="text-xs text-sky-300">
+          Auto-Tag: {state.taggedTotal}/{state.requested} Tracks
+          {state.totalBatches > 0
+            ? ` · Batch ${state.batchIndex}/${state.totalBatches}`
+            : ' · Setup…'}
+        </span>
+        <div
+          aria-hidden
+          className="h-1 w-48 overflow-hidden rounded-full bg-zinc-800"
+        >
+          <div
+            // eslint-disable-next-line react/forbid-dom-props
+            style={{ width: `${pct}%` }}
+            className="h-full bg-sky-500 transition-[width] duration-200"
+          />
+        </div>
+      </div>
     );
   }
   if (state.kind === 'error') {
@@ -376,12 +573,18 @@ function AutoTagStatusBadge({ state }: { state: AutoTagState }) {
 
 function TrackRow({
   track,
-  onToggleMood,
+  onAddMood,
+  onRemoveMood,
+  onAddGenre,
+  onRemoveGenre,
   onUpdate,
   onRemove,
 }: {
   track: LibraryTrack;
-  onToggleMood: (uri: string, tag: MoodTag) => void;
+  onAddMood: (uri: string, tag: string) => void;
+  onRemoveMood: (uri: string, tag: string) => void;
+  onAddGenre: (uri: string, g: string) => void;
+  onRemoveGenre: (uri: string, g: string) => void;
   onUpdate: (uri: string, patch: Partial<LibraryTrack>) => void;
   onRemove: (uri: string) => void;
 }) {
@@ -413,41 +616,24 @@ function TrackRow({
         {track.bpm ?? <span className="text-zinc-600">—</span>}
       </td>
       <td className="px-3 py-3">
-        <div className="flex max-w-xs flex-wrap gap-1">
-          {track.spotifyGenres.length === 0 ? (
-            <span className="text-xs text-zinc-600">keine</span>
-          ) : (
-            track.spotifyGenres.map((g) => (
-              <span
-                key={g}
-                className="rounded bg-zinc-800 px-1.5 py-0.5 text-[10px] text-zinc-300"
-              >
-                {g}
-              </span>
-            ))
-          )}
-        </div>
+        <FreeFormTagCell
+          tags={track.spotifyGenres}
+          datalistId="library-genre-vocab"
+          placeholder="+ Genre"
+          chipClass="bg-zinc-800 text-zinc-300"
+          onAdd={(g) => onAddGenre(track.uri, g)}
+          onRemove={(g) => onRemoveGenre(track.uri, g)}
+        />
       </td>
       <td className="px-3 py-3">
-        <div className="flex max-w-xs flex-wrap gap-1">
-          {MOOD_TAGS.map((tag) => {
-            const active = track.moodTags.includes(tag);
-            return (
-              <button
-                key={tag}
-                type="button"
-                onClick={() => onToggleMood(track.uri, tag)}
-                className={`rounded px-2 py-0.5 text-xs transition-colors ${
-                  active
-                    ? 'bg-purple-600 text-white'
-                    : 'bg-zinc-800 text-zinc-400 hover:bg-zinc-700'
-                }`}
-              >
-                {tag}
-              </button>
-            );
-          })}
-        </div>
+        <FreeFormTagCell
+          tags={track.moodTags}
+          datalistId="library-mood-vocab"
+          placeholder="+ Mood-Tag"
+          chipClass="bg-purple-600 text-white"
+          onAdd={(t) => onAddMood(track.uri, t)}
+          onRemove={(t) => onRemoveMood(track.uri, t)}
+        />
       </td>
       <td className="px-3 py-3">
         <EnergyControl
@@ -467,6 +653,69 @@ function TrackRow({
         </button>
       </td>
     </tr>
+  );
+}
+
+function FreeFormTagCell({
+  tags,
+  datalistId,
+  placeholder,
+  chipClass,
+  onAdd,
+  onRemove,
+}: {
+  tags: string[];
+  datalistId: string;
+  placeholder: string;
+  chipClass: string;
+  onAdd: (tag: string) => void;
+  onRemove: (tag: string) => void;
+}) {
+  const [draft, setDraft] = useState('');
+  const commit = () => {
+    const v = draft.trim();
+    if (!v) return;
+    onAdd(v);
+    setDraft('');
+  };
+  return (
+    <div className="flex max-w-xs flex-wrap items-center gap-1">
+      {tags.map((tag) => (
+        <span
+          key={tag}
+          className={`inline-flex items-center gap-1 rounded px-2 py-0.5 text-xs ${chipClass}`}
+        >
+          {tag}
+          <button
+            type="button"
+            onClick={() => onRemove(tag)}
+            className="rounded text-current/80 hover:text-current"
+            title={`"${tag}" entfernen`}
+            aria-label={`"${tag}" entfernen`}
+          >
+            ×
+          </button>
+        </span>
+      ))}
+      <input
+        type="text"
+        list={datalistId}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ',') {
+            e.preventDefault();
+            commit();
+          } else if (e.key === 'Backspace' && draft === '' && tags.length > 0) {
+            e.preventDefault();
+            onRemove(tags[tags.length - 1]);
+          }
+        }}
+        onBlur={commit}
+        placeholder={placeholder}
+        className="min-w-[6rem] flex-1 rounded bg-zinc-800/60 px-1.5 py-0.5 text-xs text-zinc-200 placeholder:text-zinc-500 focus:bg-zinc-800 focus:outline-none"
+      />
+    </div>
   );
 }
 

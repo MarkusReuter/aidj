@@ -18,10 +18,8 @@ export {
   emptyLibrary,
   LibrarySchema,
   LibraryTrackSchema,
-  MOOD_TAGS,
   type Library,
   type LibraryTrack,
-  type MoodTag,
 } from './library-schema';
 
 const LIBRARY_PATH = join(process.cwd(), 'data', 'library.json');
