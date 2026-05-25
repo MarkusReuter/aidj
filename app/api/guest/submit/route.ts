@@ -9,13 +9,14 @@
  *   X-Guest-Id: <uuid>
  *
  * Response:
- *   201 + { entry, position, deduped }       — erfolgreich (oder Idempotency-Hit)
- *   401 + { error: "not_connected" }         — Spotify nicht verbunden
+ *   201 + { entry, position, deduped }         — erfolgreich (oder Idempotency-Hit)
  *   409 + { error: "quota_exceeded", current } — Gast hat schon einen Track in der Queue
- *   409 + { error: "queue_full" }            — Gesamte Gast-Queue ist voll (10 pending)
- *   409 + { error: "no_active_device" }      — Spotify-App ist nicht aktiv
- *   422 + { error: "invalid_body", issues }  — Validation-Fehler
- *   502 + { error: "spotify_error" }         — sonstiger Spotify-Fehler
+ *   409 + { error: "queue_full" }              — Gesamte Gast-Queue ist voll (10 pending)
+ *   422 + { error: "invalid_body", issues }    — Validation-Fehler
+ *
+ * Plan2: kein Spotify-Push mehr beim Submit — der Track landet nur in der
+ * internen Queue + im Candidates-Pool. Daraus folgt: keine
+ * not_connected/no_active_device/spotify_error-Fehler hier mehr.
  */
 
 import { z } from 'zod';
@@ -108,21 +109,6 @@ export async function POST(request: Request): Promise<Response> {
           message: 'Die Gast-Queue ist voll. Warte, bis ein Track gespielt wurde.',
         },
         { status: 409 },
-      );
-    case 'not_connected':
-      return Response.json(
-        { error: 'not_connected', message: result.message },
-        { status: 401 },
-      );
-    case 'no_active_device':
-      return Response.json(
-        { error: 'no_active_device', message: result.message },
-        { status: 409 },
-      );
-    case 'spotify_error':
-      return Response.json(
-        { error: 'spotify_error', message: result.message },
-        { status: 502 },
       );
   }
 }

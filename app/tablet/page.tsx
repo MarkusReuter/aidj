@@ -35,6 +35,7 @@ export default function TabletPage() {
     onSkip,
     onDislike,
     onLove,
+    onRemoveWish,
   } = useServerState();
 
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
@@ -101,6 +102,7 @@ export default function TabletPage() {
           committedId={committedId}
           autoPickInSec={autoPickInSec}
           onTap={onCandidateTap}
+          onRemoveWish={onRemoveWish}
         />
 
         <div className="flex flex-none flex-col gap-2">

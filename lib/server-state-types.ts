@@ -15,6 +15,16 @@ export type SnapshotTrack = {
   bpm: number;
   durationMs: number;
   genre: string;
+  /**
+   * Woher der Kandidat kommt — `'guest'` für vor-gerutschten Wunsch, `'brain'`
+   * für LLM/Heuristik-Pick. Fehlt beim `currentTrack` (da spielt der Track
+   * schon, Source ist da egal).
+   */
+  source?: 'guest' | 'brain';
+  /** Nur bei `source === 'guest'`: für die Long-Press-Delete-Geste. */
+  submissionId?: string;
+  /** Nur bei `source === 'guest'`: zum Anzeigen auf der Karte. */
+  guestName?: string;
 };
 
 export type SnapshotMoodQuestion = {

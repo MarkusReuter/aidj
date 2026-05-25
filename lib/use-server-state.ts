@@ -61,6 +61,8 @@ export type UseServerStateResult = {
   onSkip: () => void;
   onDislike: () => void;
   onLove: () => void;
+  /** Plan2: Long-Press-Delete-Geste auf einer Gast-Wunsch-Karte (Tablet). */
+  onRemoveWish: (submissionId: string) => Promise<{ ok: boolean }>;
   submitGuestTrack: SubmitGuestTrackFn;
 };
 
@@ -278,17 +280,12 @@ export function useServerState(
   const onCandidateTap = useCallback(
     async (id: string) => {
       if (params.mode === 'host') {
+        // Plan2: Tap setzt nur committedId. Kein Spotify-Push hier — der
+        // passiert erst im Lock-Window oder via Skip.
         setOptimisticCommittedId(id);
         const res = await postJson('/api/queue/commit', { trackId: id });
         if (!res.ok) {
-          const data = (await res.json().catch(() => null)) as { error?: string } | null;
-          if (data?.error === 'no_active_device') {
-            setToast('🔌 Kein aktives Spotify-Device — öffne Spotify');
-          } else if (data?.error === 'not_connected') {
-            setToast('⚠ Spotify nicht verbunden');
-          } else {
-            setToast('⚠ Konnte Track nicht queuen');
-          }
+          setToast('⚠ Konnte Auswahl nicht setzen');
           setOptimisticCommittedId(null);
         }
         return;
@@ -343,6 +340,19 @@ export function useServerState(
     setToast('❤️ Mehr davon gemerkt');
   }, []);
 
+  const onRemoveWish = useCallback(
+    async (submissionId: string): Promise<{ ok: boolean }> => {
+      const res = await postJson('/api/queue/remove', { submissionId });
+      if (!res.ok) {
+        setToast('⚠ Konnte Wunsch nicht entfernen');
+        return { ok: false };
+      }
+      setToast('🗑 Wunsch entfernt');
+      return { ok: true };
+    },
+    [],
+  );
+
   return {
     ...derived,
     committedId: effectiveCommittedId,
@@ -359,6 +369,7 @@ export function useServerState(
     onSkip,
     onDislike,
     onLove,
+    onRemoveWish,
     submitGuestTrack,
   };
 }

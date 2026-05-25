@@ -16,6 +16,10 @@ export type Track = {
   bpm: number;
   durationMs: number;
   genre: string;
+  /** Mirror der `SnapshotTrack`-Felder; nur in Production-Snapshots gesetzt. */
+  source?: 'guest' | 'brain';
+  submissionId?: string;
+  guestName?: string;
 };
 
 export type MoodOption = { emoji: string; label: string; value: string };

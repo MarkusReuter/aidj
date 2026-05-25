@@ -179,6 +179,38 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
           text: `LIBRARY:\n${JSON.stringify(libraryForPrompt(input.library))}`,
         };
 
+  const messages = [
+    {
+      role: 'user' as const,
+      content: [
+        libraryTextPart,
+        {
+          type: 'text' as const,
+          text:
+            `Currently playing: ${input.currentTrackUri ?? 'nothing'}\n` +
+            `History (last 10): ${JSON.stringify(input.history)}\n` +
+            `Active playlist filters: ${input.activePlaylists.join(', ') || 'none'}\n` +
+            `Current mood question + counts: ${JSON.stringify({
+              q: input.currentMoodQuestion,
+              counts: input.moodCounts,
+            })}\n` +
+            `Aggregated button state (recency-weighted): ${JSON.stringify(input.aggregated)}\n` +
+            `Time: ${new Date(input.now).toLocaleTimeString('de-DE')}, party started: ${new Date(input.partyStartedAt).toLocaleTimeString('de-DE')}\n\n` +
+            `Now produce candidates per the schema. Pick URIs only from LIBRARY above.`,
+        },
+      ],
+    },
+  ];
+
+  console.log(
+    '[dj-brain] →',
+    JSON.stringify(
+      { provider: choice.displayName, system: DJ_INSTRUCTIONS, messages },
+      null,
+      2,
+    ),
+  );
+
   const startedAt = Date.now();
   try {
     const { object } = await generateObject({
@@ -189,29 +221,10 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
       // als erster User-Block mit cacheControl — Anthropic-Prompt-Caching
       // funktioniert auch über User-Parts.
       system: DJ_INSTRUCTIONS,
-      messages: [
-        {
-          role: 'user' as const,
-          content: [
-            libraryTextPart,
-            {
-              type: 'text' as const,
-              text:
-                `Currently playing: ${input.currentTrackUri ?? 'nothing'}\n` +
-                `History (last 10): ${JSON.stringify(input.history)}\n` +
-                `Active playlist filters: ${input.activePlaylists.join(', ') || 'none'}\n` +
-                `Current mood question + counts: ${JSON.stringify({
-                  q: input.currentMoodQuestion,
-                  counts: input.moodCounts,
-                })}\n` +
-                `Aggregated button state (recency-weighted): ${JSON.stringify(input.aggregated)}\n` +
-                `Time: ${new Date(input.now).toLocaleTimeString('de-DE')}, party started: ${new Date(input.partyStartedAt).toLocaleTimeString('de-DE')}\n\n` +
-                `Now produce candidates per the schema. Pick URIs only from LIBRARY above.`,
-            },
-          ],
-        },
-      ],
+      messages,
     });
+
+    console.log('[dj-brain] ←', JSON.stringify(object, null, 2));
 
     const latencyMs = Date.now() - startedAt;
 

@@ -1,18 +1,16 @@
 /**
- * Crowd-Tap auf eine Kandidaten-Karte. Setzt den server-side committedId-Flag
- * UND pusht den Track sofort ans Ende der Spotify-Queue.
+ * Host-Tap auf eine Kandidaten-Karte (Tablet). Setzt nur den server-side
+ * committedId-Flag. Plan2: kein direkter Spotify-Queue-Push mehr — das
+ * passiert ausschließlich im Lock-Window (~10 s vor Track-Ende) oder im
+ * Skip-Pfad. So gibt es nur EINEN "nächster Track"-Begriff = `committedId`,
+ * und Spotify wird nicht mit veralteten Picks gefüttert, falls der DJ
+ * zwischendurch umentscheidet.
  *
- * Phase-4-Vereinfachung: "Tap = sofort queueen" statt "Tap = warten bis
- * Lock-Window ~10s vor Track-Ende". Die Lock-Window-Logik kommt erst mit dem
- * DJ-Brain in Phase 5, der Auto-Pick + Re-Pick-Übersteuerung im selben Window
- * orchestriert. Bis dahin: sofort queueen ist berechenbar und gut testbar.
- *
- * 404-vom-Spotify (kein aktives Device) wird als 409 surface'd, damit das
- * UI eine "Wähle Device"-Aktion vorschlagen kann.
+ * 409 `not_a_candidate` wenn der Track-ID nicht (mehr) in der aktuellen
+ * Kandidaten-Liste ist (z.B. wegen Snapshot-Race).
  */
 
 import { z } from 'zod';
-import { addToQueue, SpotifyNotConnectedError } from '@/lib/spotify';
 import { commitCandidate, getSnapshot } from '@/lib/state';
 
 export const dynamic = 'force-dynamic';
@@ -37,11 +35,6 @@ export async function POST(request: Request): Promise<Response> {
   }
   const { trackId } = parsed.data;
 
-  // Optimistic: erst den committed-Flag setzen (SSE pusht das sofort an alle
-  // Tablets), dann den Spotify-Call machen. Wenn Spotify scheitert, geben wir
-  // einen Fehler zurück — der Caller kann den Commit clientseitig
-  // zurückrollen, aber für die Phase 4-UX reicht "Toast + Karte bleibt
-  // markiert" weil sie ja wirklich der gewählte ist.
   const ok = commitCandidate(trackId);
   if (!ok) {
     return Response.json(
@@ -54,17 +47,5 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  try {
-    await addToQueue(trackId);
-    return Response.json({ ok: true });
-  } catch (err) {
-    if (err instanceof SpotifyNotConnectedError) {
-      return Response.json({ error: 'not_connected', message: err.message }, { status: 401 });
-    }
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('Kein aktives Spotify-Device')) {
-      return Response.json({ error: 'no_active_device', message: msg }, { status: 409 });
-    }
-    return Response.json({ error: 'spotify_error', message: msg }, { status: 502 });
-  }
+  return Response.json({ ok: true });
 }

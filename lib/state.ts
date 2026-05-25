@@ -38,6 +38,7 @@ import {
   isConnected as isSpotifyConnected,
   skipToNext,
   SpotifyNotConnectedError,
+  startPlaybackTrack,
   type NowPlaying,
 } from './spotify';
 import {
@@ -172,17 +173,28 @@ export function invalidateLibraryCache(): void {
  *
  * Niemals throwen: bei totalen Brain-Ausfall (sollte mit dem internen
  * Fallback nie passieren) leeres Candidate-Array statt Crash.
+ *
+ * `count` = wieviele Slots der Brain füllen soll (Rest wird von Gast-Wünschen
+ * gefüllt). `extraExcludeUris` ergänzt die History — z.B. mit den URIs der
+ * Gast-Wünsche, damit der Brain keine Duplikate vorschlägt.
  */
 async function pickCandidatesViaBrain(
   library: LibraryTrack[],
   currentUri: string | null,
+  count: number,
+  extraExcludeUris: string[] = [],
 ): Promise<{ candidates: SnapshotTrack[]; reasonings: Record<string, string> }> {
+  if (count <= 0) return { candidates: [], reasonings: {} };
   try {
+    const history = state.history.slice(-HISTORY_MAX);
+    const augmentedHistory = extraExcludeUris.length > 0
+      ? [...history, ...extraExcludeUris]
+      : history;
     const result = await proposeNextCandidates(
       {
         library,
         currentTrackUri: currentUri,
-        history: state.history.slice(-HISTORY_MAX),
+        history: augmentedHistory,
         activePlaylists: [...state.activePlaylists],
         currentMoodQuestion:
           state.customMoodQuestion ?? currentMoodQuestion() ?? null,
@@ -192,7 +204,7 @@ async function pickCandidatesViaBrain(
         partyStartedAt: state.partyStartedAt,
       },
       {
-        count: CANDIDATE_COUNT,
+        count,
         tracksSinceRefresh:
           TRACKS_PER_MOOD_QUESTION - state.tracksUntilMoodSwitch,
       },
@@ -213,10 +225,13 @@ async function pickCandidatesViaBrain(
 
     const candidates: SnapshotTrack[] = [];
     const reasonings: Record<string, string> = {};
-    for (const c of result.candidates) {
+    for (const c of result.candidates.slice(0, count)) {
       const t = library.find((x) => x.uri === c.trackUri);
       if (!t) continue;
-      const snapshot = libraryToSnapshotTrack(t);
+      const snapshot: SnapshotTrack = {
+        ...libraryToSnapshotTrack(t),
+        source: 'brain',
+      };
       candidates.push(snapshot);
       reasonings[snapshot.id] = c.reasoning;
     }
@@ -224,6 +239,105 @@ async function pickCandidatesViaBrain(
   } catch (err) {
     console.warn('[state] dj-brain crashed unexpectedly:', err);
     return { candidates: [], reasonings: {} };
+  }
+}
+
+/**
+ * Konvertiert einen Gast-Queue-Eintrag in einen Snapshot-Track für die
+ * Kandidaten-Liste. URI + Title/Artist/Cover kommen aus dem submitten gesetzten
+ * `trackMeta`; BPM und Genre versuchen wir aus der Library zu ziehen, falls
+ * der Track dort kuratiert ist — sonst defaulten wir.
+ */
+function guestEntryToCandidate(entry: GuestEntry): SnapshotTrack {
+  const enriched = libraryCache?.find((t) => t.uri === entry.trackUri);
+  return {
+    id: entry.trackUri,
+    title: entry.trackMeta.title,
+    artist: entry.trackMeta.artist,
+    coverUrl:
+      entry.trackMeta.coverUrl ||
+      enriched?.coverUrl ||
+      'https://via.placeholder.com/600x600.png?text=No+Cover',
+    bpm: enriched?.bpm ?? DEFAULT_BPM,
+    durationMs: entry.trackMeta.durationMs,
+    genre: enriched?.spotifyGenres[0] ?? '',
+    source: 'guest',
+    submissionId: entry.submissionId,
+    guestName: entry.guestName,
+  };
+}
+
+/**
+ * Re-build der `state.candidates` aus zwei Quellen:
+ *   - Pending Gast-Wünsche, FIFO, von vorne aufgefüllt (max CANDIDATE_COUNT).
+ *   - Rest mit Brain-Picks, History inkl. Gast-URIs erweitert.
+ *
+ * `committedId` wird neu gesetzt:
+ *   - Wenn der vorherige committed-Track noch in den neuen Candidates ist,
+ *     behalten (DJ-Tap überlebt einen Wunsch-Submit).
+ *   - Sonst: ältester Gast-Wunsch oder Top-Brain-Pick = default-vor-selektiert.
+ *
+ * Coalescing: parallele Aufrufe (Track-Wechsel + Submit gleichzeitig) werden
+ * via `recomputeInFlight`/`recomputeQueued` serialisiert; während ein Run
+ * läuft, vermerken weitere Aufrufe nur einen Re-Run-Wunsch.
+ */
+let recomputeInFlight = false;
+let recomputeQueued = false;
+
+async function recomputeCandidates(currentUri: string | null): Promise<void> {
+  if (recomputeInFlight) {
+    recomputeQueued = true;
+    return;
+  }
+  recomputeInFlight = true;
+  try {
+    do {
+      recomputeQueued = false;
+      const guestSlots = listActiveGuests()
+        .filter((e) => e.status === 'pending')
+        .slice(0, CANDIDATE_COUNT);
+      const guestCandidates = guestSlots.map(guestEntryToCandidate);
+
+      const llmCount = Math.max(0, CANDIDATE_COUNT - guestCandidates.length);
+      let brainCandidates: SnapshotTrack[] = [];
+      let brainReasonings: Record<string, string> = {};
+      if (llmCount > 0) {
+        const library = await getLibrary();
+        const picked = await pickCandidatesViaBrain(
+          library,
+          currentUri,
+          llmCount,
+          guestSlots.map((g) => g.trackUri),
+        );
+        brainCandidates = picked.candidates;
+        brainReasonings = picked.reasonings;
+      }
+      // Bei llmCount === 0: state.lastBrain bleibt stehen (alter Stand der
+      // letzten Brain-Antwort), Reasonings für Brain-Slots bleiben leer.
+
+      const newCandidates: SnapshotTrack[] = [
+        ...guestCandidates,
+        ...brainCandidates,
+      ].slice(0, CANDIDATE_COUNT);
+      state.candidates = newCandidates;
+      // Reasonings nur für Brain-Slots — Gast-Slots brauchen keine.
+      state.candidateReasonings = brainReasonings;
+
+      // committedId-Preserve-Regel: DJ-Tap überlebt einen Wunsch-Submit, wenn
+      // der getippte Track noch in den neuen Candidates ist. Sonst Default.
+      const prevCommitted = state.committedId;
+      if (
+        prevCommitted &&
+        newCandidates.some((c) => c.id === prevCommitted)
+      ) {
+        // behalten
+      } else {
+        state.committedId =
+          guestCandidates[0]?.id ?? newCandidates[0]?.id ?? null;
+      }
+    } while (recomputeQueued);
+  } finally {
+    recomputeInFlight = false;
   }
 }
 
@@ -319,7 +433,13 @@ async function poll(): Promise<void> {
           state.history = state.history.slice(-HISTORY_MAX);
         }
       }
-      if (currentUri) guestMarkPlaying(currentUri);
+      // Plan2: Wenn der jetzt laufende Track ein pending Gast-Wunsch ist
+      // (Lock-Window hat ihn gerade gepuscht), direkt als `done` markieren —
+      // der Wunsch ist erfüllt und sein Slot wird im Recompute frei.
+      if (currentUri) {
+        guestMarkPlaying(currentUri);
+        guestMarkDone(currentUri);
+      }
 
       state.committedId = null;
       state.lockedTrackUri = null;
@@ -335,15 +455,14 @@ async function poll(): Promise<void> {
         state.tracksUntilMoodSwitch = TRACKS_PER_MOOD_QUESTION;
       }
 
-      // Brain anrufen — entscheidet selbst, ob LLM oder Heuristik.
-      const library = await getLibrary();
-      const picked = await pickCandidatesViaBrain(library, currentUri);
-      state.candidates = picked.candidates;
-      state.candidateReasonings = picked.reasonings;
+      // Kandidaten neu mischen — Gast-Wünsche zuerst, Brain für den Rest.
+      await recomputeCandidates(currentUri);
     }
 
-    // ── Lock-Window: ~10s vor Track-Ende den Auto-Pick in Spotify-Queue pushen.
-    // Verwendet die committed-Wahl (Tablet-Tap) wenn vorhanden, sonst Top-Brain-Pick.
+    // ── Lock-Window: ~10s vor Track-Ende den committedId-Track in Spotify
+    // queueen. Plan2: committedId ist nach recomputeCandidates non-null sobald
+    // irgendein Candidate da ist (Gast-Wunsch oder Top-Brain-Pick), kein
+    // Fallback mehr nötig.
     if (
       np &&
       currentUri &&
@@ -351,10 +470,7 @@ async function poll(): Promise<void> {
       np.track.durationMs - np.progressMs <= LOCK_WINDOW_MS &&
       np.track.durationMs - np.progressMs > 0
     ) {
-      const pickUri =
-        state.committedId ?? state.candidates[0]?.id ?? null;
-      // Nicht Lock-Pushen wenn der Pick gerade selbst der laufende Track ist
-      // (paranoid; sollte nicht passieren, weil Kandidaten den laufenden ausschließen).
+      const pickUri = state.committedId;
       if (pickUri && pickUri !== currentUri) {
         try {
           await addToQueue(pickUri);
@@ -475,17 +591,11 @@ function shouldTriggerReRank(type: 'mood' | 'anti', value: string): boolean {
 async function reRankAsync(reason: string): Promise<void> {
   if (!state.lastTrackUri) return;
   try {
-    const library = await getLibrary();
-    const picked = await pickCandidatesViaBrain(library, state.lastTrackUri);
-    state.candidates = picked.candidates;
-    state.candidateReasonings = picked.reasonings;
-    // Wenn die committed-Wahl nicht mehr in den neuen Kandidaten ist, freigeben.
-    if (
-      state.committedId &&
-      !picked.candidates.some((c) => c.id === state.committedId)
-    ) {
-      state.committedId = null;
-    }
+    // Plan2: Gast-Slots überleben den Re-Rank, nur Brain-Slots werden neu
+    // gewürfelt. recomputeCandidates trifft die committedId-Preserve-Logik
+    // selbst (DJ-Tap auf Brain-Karte überlebt nicht, Tap auf Gast-Karte schon
+    // weil die Karte noch da ist).
+    await recomputeCandidates(state.lastTrackUri);
     emit();
     console.log(`[state] re-ranked candidates (reason: ${reason})`);
   } catch (err) {
@@ -511,23 +621,21 @@ export function commitCandidate(trackId: string): boolean {
 export type SubmitGuestResult =
   | { ok: true; entry: GuestEntry; position: number; deduped: boolean }
   | { ok: false; error: 'quota_exceeded'; current: GuestEntry }
-  | { ok: false; error: 'queue_full' }
-  | { ok: false; error: 'not_connected'; message: string }
-  | { ok: false; error: 'no_active_device'; message: string }
-  | { ok: false; error: 'spotify_error'; message: string };
+  | { ok: false; error: 'queue_full' };
 
 /**
- * Submit eines Gast-Track-Wunschs. Geht durch:
- *   1. Quota/Idempotency-Check in guest-queue.enqueue (mutex)
- *   2. Spotify-addToQueue: lässt den Track ans Ende der Connect-Queue
- *      hängen, sodass er nach allen schon gequeueten Tracks läuft.
- *   3. Bei Spotify-Fehler → rollback aus der Gast-Queue, damit der Gast
- *      direkt neu submitten kann (z.B. nachdem das Device aktiv wurde).
+ * Plan2: Submit pusht NICHT mehr direkt zur Spotify-Queue. Stattdessen landet
+ * der Track im internen `state.candidates`-Pool (über `recomputeCandidates`).
+ * Das Lock-Window ~10 s vor Track-Ende oder ein User-Skip pusht den
+ * vor-selektierten committedId-Track an Spotify.
  *
- * Phase-4a-Vereinfachung: "Submit = sofort Spotify-Queue". Lock-Window
- * vor Track-Ende kommt mit Phase 5 (DJ-Brain) — dann wandert der
- * eigentliche Queue-Push dort hin und Phase 4a's Submit befüllt nur
- * noch die Gast-Queue.
+ * Reihenfolge:
+ *   1. `guestEnqueue` (mutex, idempotent, quota+max-pending).
+ *   2. `recomputeCandidates(lastTrackUri)` — die neue Wunsch-Karte verdrängt
+ *      einen LLM-Slot ohne auf den Track-Wechsel zu warten.
+ *   3. `emit()` für sofortige UI-Aktualisierung.
+ *
+ * Fehler-Typen ohne Spotify reduzieren sich auf `quota_exceeded` + `queue_full`.
  */
 export async function submitGuestTrack(input: {
   guestId: string;
@@ -541,28 +649,28 @@ export async function submitGuestTrack(input: {
     emit(); // Snapshot fürs UI ist trotzdem fresh.
     return queued;
   }
-  // Idempotency-Hit → Spotify-Call schon beim ersten Mal gelaufen,
-  // nicht doppelt feuern.
-  if (queued.deduped) {
-    emit();
-    return { ok: true, entry: queued.entry, position: queued.position, deduped: true };
-  }
-  try {
-    await addToQueue(input.trackUri);
-  } catch (err) {
-    await guestRollback(input.submissionId);
-    emit();
-    if (err instanceof SpotifyNotConnectedError) {
-      return { ok: false, error: 'not_connected', message: err.message };
-    }
-    const msg = err instanceof Error ? err.message : String(err);
-    if (msg.includes('Kein aktives Spotify-Device')) {
-      return { ok: false, error: 'no_active_device', message: msg };
-    }
-    return { ok: false, error: 'spotify_error', message: msg };
-  }
+  // Bei deduped wie auch bei frischem Enqueue: Candidates neu mischen, damit
+  // das Tablet die Karte direkt sieht.
+  await recomputeCandidates(state.lastTrackUri);
   emit();
-  return { ok: true, entry: queued.entry, position: queued.position, deduped: false };
+  return {
+    ok: true,
+    entry: queued.entry,
+    position: queued.position,
+    deduped: queued.deduped,
+  };
+}
+
+/**
+ * Plan2: Notfall-Lösch-Geste vom Tablet (Long-Press auf Wunsch-Karte).
+ * Entfernt den Entry komplett aus der Gast-Queue, sodass der Gast direkt neu
+ * submitten kann. Danach Candidates neu mischen — der frei gewordene Slot
+ * wird ggf. von einem LLM-Pick gefüllt.
+ */
+export async function removeGuestWish(submissionId: string): Promise<void> {
+  await guestRollback(submissionId);
+  await recomputeCandidates(state.lastTrackUri);
+  emit();
 }
 
 /**
@@ -587,18 +695,30 @@ export function getAntiCounts(): Readonly<typeof antiCounts> {
 }
 
 /**
- * Skip-Track: drückt Spotify-Next + räumt Gast-Queue auf + triggert
- * Brain-Re-Rank für den Slot danach. Idempotent gegen Doppel-Skip — Spotify
- * gibt einfach erneut "next" zurück, was im Worst-Case einen Track weiter
- * vorne überspringt; wir akzeptieren das als Edge-Case.
+ * Skip-Track. Plan2: Statt `skipToNext` (das spielt aus Spotifys eigener
+ * Queue irgendwas Altes — Album-Auto-Advance, frühere Lock-Window-Pushes etc.)
+ * starten wir explizit den committedId-Track via `startPlaybackTrack`. So
+ * landen wir verbindlich beim vor-selektierten Pick.
+ *
+ * Fallback auf `skipToNext` nur wenn noch gar kein Candidate da ist
+ * (Edge-Case erste Session, Brain noch nicht durch).
+ *
+ * `state.lockedTrackUri = pickUri` verhindert, dass das nachfolgende
+ * Lock-Window denselben Track nochmal an die Queue hängt.
  */
 export type SkipResult =
   | { ok: true }
   | { ok: false; error: 'not_connected' | 'no_active_device' | 'spotify_error'; message: string };
 
 export async function skipCurrentTrack(): Promise<SkipResult> {
+  const pickUri = state.committedId;
   try {
-    await skipToNext(state.activeDeviceId ?? undefined);
+    if (pickUri) {
+      await startPlaybackTrack(pickUri, state.activeDeviceId ?? undefined);
+      state.lockedTrackUri = pickUri;
+    } else {
+      await skipToNext(state.activeDeviceId ?? undefined);
+    }
   } catch (err) {
     if (err instanceof SpotifyNotConnectedError) {
       return { ok: false, error: 'not_connected', message: err.message };

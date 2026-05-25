@@ -378,7 +378,9 @@ export async function getCurrentTrack(): Promise<NowPlaying> {
 }
 
 /**
- * Hängt einen Track ans Ende der Spotify-Queue. Spotify gibt 204 zurück.
+ * Hängt einen Track ans Ende der Spotify-Queue. Spotify dokumentiert 204, liefert
+ * inzwischen aber je nach Endpoint-Version auch 200 mit einer Request-ID im Body
+ * — beides ist Success, also `res.ok` prüfen statt hart auf 204.
  * 404 kommt, wenn kein aktives Device existiert — surface das als spezifischer
  * Fehler, damit der Caller "Device wählen" anzeigen kann.
  */
@@ -386,7 +388,7 @@ export async function addToQueue(uri: string, deviceId?: string): Promise<void> 
   const qs = new URLSearchParams({ uri });
   if (deviceId) qs.set('device_id', deviceId);
   const res = await spotifyFetch(`/v1/me/player/queue?${qs}`, { method: 'POST' });
-  if (res.status === 204) return;
+  if (res.ok) return;
   if (res.status === 404) {
     throw new Error(
       'Kein aktives Spotify-Device. Öffne die Spotify-App, starte einen Track oder wähle ein Device über /api/spotify/select-device.',
@@ -398,11 +400,39 @@ export async function addToQueue(uri: string, deviceId?: string): Promise<void> 
 export async function skipToNext(deviceId?: string): Promise<void> {
   const qs = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
   const res = await spotifyFetch(`/v1/me/player/next${qs}`, { method: 'POST' });
-  if (res.status === 204) return;
+  if (res.ok) return;
   if (res.status === 404) {
     throw new Error('Kein aktives Spotify-Device für skip.');
   }
   throw new Error(`skipToNext: ${res.status} ${await res.text()}`);
+}
+
+/**
+ * Startet einen konkreten Track direkt — überspringt damit alles, was sonst
+ * in Spotifys eigener Queue läge (Album-Auto-Advance, frühere addToQueue-Pushes,
+ * Radio-Vorschläge). `PUT /v1/me/player/play` mit `{ uris: [uri] }`. Wird vom
+ * Skip-Button benutzt, damit der DJ verbindlich den committedId-Track als
+ * nächstes spielt, nicht "irgendwas, was Spotify in petto hat".
+ *
+ * Status-Code-Handling wie [addToQueue]: `res.ok` ist Success, 404 = kein Device.
+ */
+export async function startPlaybackTrack(
+  uri: string,
+  deviceId?: string,
+): Promise<void> {
+  const qs = deviceId ? `?device_id=${encodeURIComponent(deviceId)}` : '';
+  const res = await spotifyFetch(`/v1/me/player/play${qs}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ uris: [uri] }),
+  });
+  if (res.ok) return;
+  if (res.status === 404) {
+    throw new Error(
+      'Kein aktives Spotify-Device. Öffne die Spotify-App, starte einen Track oder wähle ein Device über /api/spotify/select-device.',
+    );
+  }
+  throw new Error(`startPlaybackTrack: ${res.status} ${await res.text()}`);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
