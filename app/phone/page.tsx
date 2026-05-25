@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { MOCK_PLAYLISTS, MOCK_TRACKS, type Track } from '@/lib/mock-data';
+import { MOCK_PLAYLISTS } from '@/lib/mock-data';
 import { useServerState } from '@/lib/use-server-state';
 import { useDjMode } from '@/lib/phone/dj-mode';
 import { useGuestId } from '@/lib/phone/guest-id';
@@ -25,31 +25,20 @@ import AntiButtons from '@/components/AntiButtons';
 
 type CSSVarStyle = CSSProperties & Record<'--bpm', string>;
 
-function trackToSearchResult(
-  track: Track,
-  source: 'playlist' | 'spotify',
-): SearchResult {
-  return {
-    id: track.id,
-    title: track.title,
-    artist: track.artist,
-    coverUrl: track.coverUrl,
-    source,
-  };
-}
-
-// Mock-Such-Funktion: Substring-Match über MOCK_TRACKS. Wird in Phase 3a
-// durch `fetch('/api/search?q=…')` ersetzt — die Komponente bleibt gleich.
-async function mockSearch(query: string): Promise<SearchResult[]> {
-  const q = query.toLowerCase();
-  const matches = MOCK_TRACKS.filter(
-    (t) =>
-      t.title.toLowerCase().includes(q) ||
-      t.artist.toLowerCase().includes(q),
-  );
-  return matches.map((t, idx) =>
-    trackToSearchResult(t, idx % 2 === 0 ? 'playlist' : 'spotify'),
-  );
+// Echte Such-Funktion (Phase 3a): trifft den /api/search-Proxy, der Library
+// + Spotify zusammenführt. Robust gegen Netzfehler — bei Fehlern leeres Result,
+// die SearchAutocomplete-UI rendert dann "Keine Treffer".
+async function liveSearch(query: string): Promise<SearchResult[]> {
+  try {
+    const res = await fetch(
+      `/api/search?q=${encodeURIComponent(query)}&scope=all`,
+    );
+    if (!res.ok) return [];
+    const body = (await res.json()) as { results?: SearchResult[] };
+    return body.results ?? [];
+  } catch {
+    return [];
+  }
 }
 
 export default function PhonePage() {
@@ -189,7 +178,7 @@ export default function PhonePage() {
       />
 
       <SearchAutocomplete
-        searchFn={mockSearch}
+        searchFn={liveSearch}
         onPick={handleSearchPick}
         disabled={Boolean(mySubmission)}
         disabledHint={

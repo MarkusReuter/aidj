@@ -510,3 +510,60 @@ export async function getMyPlaylistsPaginated(): Promise<SpotifyPlaylistSummary[
   }
   return out;
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 3a: Spotify-Track-Search (für Phone-Suchfeld).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type SpotifyTrackHit = {
+  uri: string;
+  title: string;
+  artist: string;
+  coverUrl: string | null;
+  durationMs: number;
+};
+
+type RawSearchTrack = {
+  uri: string;
+  name: string;
+  duration_ms: number;
+  artists: { name: string }[];
+  album: { images: { url: string; width: number | null; height: number | null }[] };
+};
+
+/**
+ * Sucht Tracks via `/v1/search`. Market `DE` ist hardcoded — die App läuft auf
+ * Markus' Mac in Deutschland; das vermeidet `from_token`, das Spotify
+ * mittlerweile deprecated hat, und ist deterministisch. Limit 10 reicht für
+ * Autocomplete-Dropdown.
+ */
+export async function searchSpotifyTracks(
+  query: string,
+  market = 'DE',
+  limit = 10,
+): Promise<SpotifyTrackHit[]> {
+  const qs = new URLSearchParams({
+    q: query,
+    type: 'track',
+    market,
+    limit: String(limit),
+  });
+  const res = await spotifyFetch(`/v1/search?${qs}`);
+  if (!res.ok) {
+    // Search benötigt keinen Extra-Scope, aber Dev-Mode-Restrictions können
+    // hier wie sonst überall zuschlagen. Wir loggen und liefern leeres Result,
+    // damit das Phone-UI nicht crasht.
+    return [];
+  }
+  const data = (await res.json()) as {
+    tracks?: { items?: RawSearchTrack[] | null } | null;
+  };
+  const items = data.tracks?.items ?? [];
+  return items.map((t) => ({
+    uri: t.uri,
+    title: t.name,
+    artist: t.artists.map((a) => a.name).join(', '),
+    coverUrl: t.album?.images?.[0]?.url ?? null,
+    durationMs: t.duration_ms,
+  }));
+}
