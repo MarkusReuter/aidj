@@ -1,24 +1,23 @@
 # AIDJ — Party-DJ Tablet App
 
-Touch-only Tablet-App für Hausparties. Du stellst dem System eine kuratierte Track-Library zur Verfügung, Claude wählt während der Party laufend 3–4 passende nächste Tracks vor, Gäste tippen Kandidaten-Karten am iPad an, und Spotify Connect spielt ab. Smartphones der Gäste werden via QR-Code zum Wunschmusik-Kanal.
+Touch-only Tablet-App für Hausparties. Du stellst dem System eine kuratierte Track-Library zur Verfügung, ein LLM (Claude oder Gemini, deine Wahl) schlägt während der Party laufend 3–4 passende nächste Tracks vor, Gäste tippen Kandidaten-Karten am iPad an, und Spotify Connect spielt ab. Smartphones der Gäste werden via QR-Code zum Wunschmusik-Kanal.
 
 Das hier ist eine **lokal gehostete App** — keine Cloud, kein Account-Service. Du registrierst eine eigene Spotify-Developer-App, der Server läuft auf deinem Rechner, das iPad und die Phones reden über WLAN mit ihm.
 
 ## Status
 
-Reifegrad: **Spotify end-to-end, DJ-Brain noch Random** — Tablet/Phone zeigen echten Spotify-Track, Tap auf eine Kandidaten-Karte queued ihn wirklich. Die Track-Auswahl ist noch zufällig (kein LLM-Reasoning).
+Reifegrad: **end-to-end spielbar** — Tablet/Phone zeigen echten Spotify-Track, Tap auf eine Kandidaten-Karte queued ihn wirklich, das LLM-Brain liefert echte DJ-Vorschläge (mit Heuristik-Fallback wenn kein API-Key gesetzt ist).
 
 - ✅ Tablet-UI (Landscape, 4 Kandidaten-Karten, Mood-Buttons, Playlist-Toggles, Anti-Buttons)
 - ✅ Phone-UI (Portrait, Track-Suche, Gast-Queue, Hidden-DJ-Mode via 10× Tap aufs Logo)
 - ✅ UA-Routing auf `/` (Phone → `/phone`, sonst → `/tablet`)
-- ✅ Library-Editor unter `/admin` (Mood-Tags + Energy taggen)
-- ✅ `build-library`-Skript (Spotify-Playlists → `data/library.json` + BPM via GetSongBPM)
-- ✅ Spotify-OAuth-Flow + API-Proxy (Queue, Now-Playing, Devices, Transfer-Playback)
+- ✅ Library-Editor + Playlist-Picker unter `/admin` (Mood-Tags + Energy taggen, Library additiv aus Spotify-Playlists bauen)
+- ✅ `build-library`-Skript als Power-User-Fallback (Spotify-Playlists → `data/library.json` + BPM via GetSongBPM)
+- ✅ Spotify-OAuth-Flow + API-Proxy (Queue, Now-Playing, Devices, Transfer-Playback, Search)
 - ✅ SSE-Pipeline + Server-State (Multi-Client-Sync, Spotify-Polling, Mood/Playlist serverseitig)
 - ✅ Gast-Queue-Server-State (FIFO + 1-Slot-Quota + Idempotenz, Phone-Submission via `/api/guest/submit`)
-- 🔧 Claude-DJ-Brain (heute Random-Kandidaten aus Library statt LLM)
-- 🔧 Gast-Queue-UI auf dem Tablet (heute nur über SSE-Snapshot sichtbar, kein Badge)
-- 🔧 Skip-Button + Lock-Window 10 s vor Track-Ende (kommt mit DJ-Brain)
+- ✅ DJ-Brain mit zwei LLM-Providern (Google Gemini **oder** Anthropic Claude) + Heuristik-Fallback bei fehlendem Key
+- ✅ Lock-Window 10 s vor Track-Ende (Auto-Pick wird in Spotify-Queue gepusht), echter Skip-Button
 
 Vollständige Roadmap mit Begründungen in [PLAN.md](./PLAN.md).
 
@@ -31,7 +30,7 @@ Vollständige Roadmap mit Begründungen in [PLAN.md](./PLAN.md).
 
 **Accounts**
 - **Spotify Premium** — hart erforderlich, Queue-Control ist Premium-only.
-- (Optional, später) Anthropic-API-Key — erst relevant, wenn das DJ-Brain-Feature fertig ist.
+- (Optional, empfohlen) **LLM-API-Key** — entweder kostenlos via Google Gemini oder pay-per-token via Anthropic Claude. Ohne Key läuft die App mit einer einfachen Heuristik. Details in [Schritt 7: DJ-Brain aktivieren](#7-dj-brain-aktivieren-llm-key-setzen).
 
 ## Software installieren (nackter Windows/Mac)
 
@@ -104,7 +103,7 @@ SPOTIFY_CLIENT_SECRET=<aus dem Dashboard>
 SPOTIFY_REDIRECT_URI=http://127.0.0.1:3000/api/spotify/callback
 ```
 
-`GETSONGBPM_API_KEY` und `ANTHROPIC_API_KEY` kannst du leer lassen — die brauchst du erst später.
+`GETSONGBPM_API_KEY` kannst du leer lassen, wenn du das `build-library`-CLI-Skript nicht nutzt (der Playlist-Picker im Admin-UI braucht ihn nicht). Die LLM-Keys (`GOOGLE_GENERATIVE_AI_API_KEY` und `ANTHROPIC_API_KEY`) bleiben jetzt leer — das machen wir in [Schritt 7](#7-dj-brain-aktivieren-llm-key-setzen).
 
 ### 4. Spotify-OAuth durchlaufen
 
@@ -122,7 +121,7 @@ Die Tokens (Access + Refresh) liegen jetzt unter `~/.aidj-app/token.json` (auf W
 
 Für die Mock-Demo kannst du diesen Schritt überspringen; die App hat 15 Beispiel-Tracks eingebaut.
 
-Für echten Betrieb: erstelle eine oder mehrere Spotify-Playlists (in deinem normalen Spotify-Account) mit Tracks, aus denen Claude später wählen darf — z.B. eine "Warm-up", eine "Peak Time", eine "Closer". Insgesamt 100–300 Tracks ergeben gute Variation für 4–5 h Party.
+Für echten Betrieb: erstelle eine oder mehrere Spotify-Playlists (in deinem normalen Spotify-Account) mit Tracks, aus denen das DJ-Brain später wählen darf — z.B. eine "Warm-up", eine "Peak Time", eine "Closer". Insgesamt 100–300 Tracks ergeben gute Variation für 4–5 h Party.
 
 ```bash
 npm run build-library -- spotify:playlist:abc123 spotify:playlist:def456
@@ -142,6 +141,90 @@ npm run dev
 ```
 
 Pro Track Mood-Tags (warm-up, peak, banger, feelgood, …) und Energy-Level (1–10) setzen. Spart dir nicht extrem viel — der LLM kommt auch ohne klar — aber gibt ihm zusätzliches Signal für sauberere Übergänge.
+
+### 7. DJ-Brain aktivieren (LLM-Key setzen)
+
+**Was passiert ohne LLM-Key?** Die App läuft mit einer einfachen Heuristik: BPM-Match ±10 zum aktuellen Track, History-Exclusion der letzten ~10 Tracks, 👎-/❤️-Penalties über Tag-Overlap. Funktioniert, ist aber weniger smart bei Mood-Übergängen und kann keine neuen Mood-Fragen ans Publikum stellen.
+
+**Mit LLM-Key** bekommst du echtes DJ-Reasoning: 3–4 bewusst diverse Kandidaten pro Track-Wechsel, dynamische Mood-Frage-Refreshes wenn die Crowd-Stimmung kippt, Vibe-Aware-Genre-Mischung.
+
+Du hast zwei Provider zur Auswahl — du brauchst **nur einen** (wenn beide gesetzt sind, hat Gemini Vorrang):
+
+#### Option A — Google Gemini (kostenlos, empfohlen für den Start)
+
+Der Free-Tier reicht für eine ganze Party locker: 15 Requests/Minute und 1 Mio. Token/Tag bei `gemini-2.5-flash`. **Keine Kreditkarte nötig.**
+
+1. Öffne **https://aistudio.google.com/apikey** und log dich mit deinem Google-Account ein.
+2. Klick **"Create API key"** → **"Create API key in new project"** (Google legt automatisch ein Gemini-Projekt an — kein eigener Cloud-Setup nötig).
+3. Den Key kopieren (beginnt mit `AIza…`).
+4. In `.env.local` einfügen:
+   ```
+   GOOGLE_GENERATIVE_AI_API_KEY=AIza…
+   ```
+5. Falls der Server läuft: stoppen (`Ctrl+C`) und neu starten — `.env.local` wird nur beim Start gelesen.
+
+Beim nächsten Track-Wechsel siehst du im **Admin-UI** (`/admin`) den Badge **"🧠 Gemini 2.5 Flash"** mit Latenz + Alter des letzten Picks. In der Server-Konsole erscheint pro erfolgreicher LLM-Antwort eine Zeile wie `[dj-brain] ✓ Gemini 2.5 Flash → 4 candidates in 1234ms`.
+
+#### Option B — Anthropic Claude (pay-per-token, beste Qualität)
+
+Claude Sonnet 4.6 macht subjektiv die saubersten Übergänge — kostet aber Geld und braucht eine Kreditkarte (Anthropic hat keinen Free-Tier).
+
+1. Öffne **https://console.anthropic.com** und lege einen Account an.
+2. Email + Telefon verifizieren.
+3. **Settings → Billing → Add credits** → Minimum **$5** aufladen.
+4. **Settings → API Keys → Create Key** → einen Namen vergeben (z.B. "AIDJ-Party") → Key kopieren (beginnt mit `sk-ant-…`). Achtung: Anthropic zeigt den Key nur einmal an, danach nie wieder.
+5. In `.env.local` einfügen:
+   ```
+   ANTHROPIC_API_KEY=sk-ant-…
+   ```
+6. Server neu starten.
+
+**Realistische Party-Kosten: $0,50–$2 für 4–5 h.** Die App nutzt Anthropic-Prompt-Caching für den Library-Block — d.h. die 100–300 Tracks landen nur einmal pro Stunde im voll-abgerechneten Input, jeder weitere Re-Rank kostet nur den kleinen variablen Anteil (Now-Playing, History, Mood-Counts).
+
+#### Welcher Provider wird benutzt?
+
+Die Logik steht in [lib/dj-brain.ts](lib/dj-brain.ts) (`pickModel()`):
+
+1. Wenn `GOOGLE_GENERATIVE_AI_API_KEY` gesetzt → **Gemini 2.5 Flash**.
+2. Sonst, wenn `ANTHROPIC_API_KEY` gesetzt → **Claude Sonnet 4.6**.
+3. Sonst → **Heuristik**.
+
+Beide Keys gleichzeitig gesetzt = Gemini gewinnt. Wenn du explizit Claude erzwingen willst, kommentier den Gemini-Key in `.env.local` aus (`# GOOGLE_GENERATIVE_AI_API_KEY=…`) oder leere ihn.
+
+#### Provider-Vergleich
+
+| | Google Gemini 2.5 Flash | Anthropic Claude Sonnet 4.6 |
+|---|---|---|
+| Kosten pro Party | **Kostenlos** (Free-Tier) | ~$0,50–$2 |
+| Free-Tier-Limits | 15 RPM, 1M Token/Tag | Kein Free-Tier |
+| Kreditkarte nötig | Nein | Ja (Min. $5 aufladen) |
+| Setup-Zeit | ~2 Min | ~5–10 Min (Verifizierung) |
+| Prompt-Caching | Automatisch ab gewisser Größe | Explizit in der App eingebaut |
+| Geschwindigkeit | Sehr schnell | Schnell |
+| DJ-Qualität | Sehr gut | Subjektiv die beste, klarere Übergangs-Begründungen |
+
+#### Wie du siehst, dass es klappt
+
+Drei Signale:
+
+1. **Admin-UI-Badge** (`/admin`): zeigt live nach jedem Track-Wechsel **"🧠 Gemini 2.5 Flash"** (blau) bzw. **"🧠 Claude Sonnet 4.6"** (violett) bzw. **"⚙ Heuristik"** (grau) inkl. Latenz und Alter des letzten Picks.
+2. **Server-Konsole**: pro erfolgreichem Call eine Zeile wie:
+   ```
+   [dj-brain] ✓ Gemini 2.5 Flash → 4 candidates in 1234ms
+   ```
+3. **SSE-Payload**: Feld `brain: { provider, latencyMs, at }` im Snapshot (für Custom-Debug-Tools).
+
+#### Wenn das LLM nicht antwortet
+
+Der Brain hat einen 15-Sekunden-Timeout pro Request. Schlägt der LLM-Call fehl (Netz weg, Rate-Limit überschritten, halluzinierte URIs, Schema-Mismatch), fällt die App still auf die Heuristik zurück — die Party läuft weiter. Der Admin-Badge wechselt dann auf "⚙ Heuristik". In der Server-Konsole steht z.B.:
+
+```
+[dj-brain] ✗ Gemini 2.5 Flash failed after 421ms, falling back to heuristic: …
+```
+
+Wenn du das oft siehst:
+- **Rate-Limit (Gemini)**: 15 RPM heißt ein LLM-Call alle 4 Sekunden — bei normalen Track-Längen (3–4 min) nie ein Problem. Wenn doch: kurz warten oder kostenlos auf Paid-Tier umsteigen.
+- **Halluzinierte URIs**: Library zu klein (< 30 Tracks) oder zu repetitiv → das LLM erfindet URIs. Mehr Tracks ins `library.json` oder Heuristik nutzen.
 
 ## Party-Betrieb
 
@@ -183,12 +266,12 @@ QR-Code wird oben rechts auf dem Tablet angezeigt. Gäste scannen, landen auf `/
 iPad  ─┐
        ├─ WLAN ─→  Next.js auf deinem Rechner  ─→  Spotify-API  ─→  Spotify-Connect-Device
 Phone ─┘                  ↓                                                ↓
-                    Claude-API                                       Bluetooth/AVR/Sonos
+                  LLM-API (Gemini/Claude)                            Bluetooth/AVR/Sonos
                                                                          ↓
                                                                        Speaker
 ```
 
-Der Server ist die einzige Komponente, die mit Spotify und Claude redet. Tablet und Phones sind reine UI-Frontends, die via WLAN auf ihn zugreifen. Token + State liegen ausschließlich auf dem Server.
+Der Server ist die einzige Komponente, die mit Spotify und dem LLM redet. Tablet und Phones sind reine UI-Frontends, die via WLAN auf ihn zugreifen. Token + State liegen ausschließlich auf dem Server.
 
 Volle Architektur-Diagramme + Begründungen in [PLAN.md](./PLAN.md).
 

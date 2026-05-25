@@ -6,20 +6,21 @@
  * weiß nicht, ob die Antwort vom LLM oder vom Heuristik-Fallback kommt — beide
  * haben dieselbe Output-Form.
  *
- * Modes:
- *   - **LLM**: ANTHROPIC_API_KEY ist gesetzt → Claude wird via `generateObject`
- *     mit Library im prompt-gecachten System-Block aufgerufen.
- *   - **Fallback**: kein Key, LLM-Fehler oder Timeout → heuristische Auswahl
- *     (BPM-Match ±10, History-Exclusion, Mood-/Energy-Bias).
+ * Provider-Priorität (siehe `pickModel()` unten):
+ *   1. **Google Gemini** — wenn GOOGLE_GENERATIVE_AI_API_KEY gesetzt (Free-Tier-fähig).
+ *   2. **Anthropic Claude** — wenn ANTHROPIC_API_KEY gesetzt.
+ *   3. **Heuristik-Fallback** — kein Key, LLM-Fehler oder Timeout: BPM-Match ±10,
+ *      History-Exclusion, Mood-/Energy-Bias.
  *
  * Wichtig: niemals throwen. Build-/Polling-Loop verlässt sich darauf, dass
  * der Brain immer was zurückgibt — auch wenn das LLM 500't.
  *
- * Server-only — importiert `@ai-sdk/anthropic` + lib/library.
+ * Server-only.
  */
 
 import { anthropic } from '@ai-sdk/anthropic';
-import { generateObject } from 'ai';
+import { google } from '@ai-sdk/google';
+import { generateObject, type LanguageModel } from 'ai';
 import { z } from 'zod';
 import type { LibraryTrack } from './library-schema';
 import { MOCK_MOOD_QUESTIONS, type MoodQuestion } from './mock-data';
@@ -35,12 +36,16 @@ export type BrainCandidate = {
   reasoning: string;
 };
 
+export type BrainProvider = 'google' | 'anthropic' | 'heuristic';
+
 export type BrainResult = {
   candidates: BrainCandidate[];
   shouldRefreshMoodQuestion: boolean;
   newMoodQuestion: MoodQuestion | null;
-  /** True wenn die Antwort vom LLM kam, false wenn Heuristik-Fallback. */
-  fromLLM: boolean;
+  /** Welcher Pfad hat geantwortet — für SSE-Payload + Admin-Badge. */
+  provider: BrainProvider;
+  /** Round-Trip-Zeit in ms (0 für Heuristik). */
+  latencyMs: number;
 };
 
 /** Recency-weighted Aggregat der letzten Button-Klicks. */
@@ -151,16 +156,65 @@ function libraryForPrompt(lib: LibraryTrack[]): LibraryPromptEntry[] {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Provider-Auswahl. Gemini hat Vorrang (Free-Tier), Anthropic-Fallback.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ModelChoice = {
+  model: LanguageModel;
+  /** Für Logging + um den Anthropic-spezifischen Prompt-Cache nur dort zu setzen. */
+  provider: 'google' | 'anthropic';
+  displayName: string;
+};
+
+function pickModel(): ModelChoice | null {
+  const geminiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
+  if (geminiKey) {
+    return {
+      model: google('gemini-2.5-flash'),
+      provider: 'google',
+      displayName: 'Gemini 2.5 Flash',
+    };
+  }
+  const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (anthropicKey) {
+    return {
+      model: anthropic('claude-sonnet-4-6'),
+      provider: 'anthropic',
+      displayName: 'Claude Sonnet 4.6',
+    };
+  }
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // LLM-Call.
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function callLLM(input: BrainInput): Promise<BrainResult | null> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey || apiKey.trim().length === 0) return null;
+  const choice = pickModel();
+  if (!choice) return null;
 
+  // Prompt-Caching nur bei Anthropic — Gemini ignoriert provider-namespaced
+  // Optionen einer anderen Engine, aber wir setzen sie erst gar nicht, um den
+  // Wire-Payload sauber zu halten.
+  const libraryTextPart =
+    choice.provider === 'anthropic'
+      ? {
+          type: 'text' as const,
+          text: `LIBRARY:\n${JSON.stringify(libraryForPrompt(input.library))}`,
+          providerOptions: {
+            anthropic: { cacheControl: { type: 'ephemeral' as const } },
+          },
+        }
+      : {
+          type: 'text' as const,
+          text: `LIBRARY:\n${JSON.stringify(libraryForPrompt(input.library))}`,
+        };
+
+  const startedAt = Date.now();
   try {
     const { object } = await generateObject({
-      model: anthropic('claude-sonnet-4-6'),
+      model: choice.model,
       schema: CandidatesSchema,
       // System-Prompt als Top-Level-String (Vercel AI SDK erlaubt für system
       // keine Content-Parts mit providerOptions). Library landet stattdessen
@@ -171,13 +225,7 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
         {
           role: 'user' as const,
           content: [
-            {
-              type: 'text' as const,
-              text: `LIBRARY:\n${JSON.stringify(libraryForPrompt(input.library))}`,
-              providerOptions: {
-                anthropic: { cacheControl: { type: 'ephemeral' } },
-              },
-            },
+            libraryTextPart,
             {
               type: 'text' as const,
               text:
@@ -197,11 +245,15 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
       ],
     });
 
+    const latencyMs = Date.now() - startedAt;
+
     // URIs gegen die Library validieren — LLM könnte halluzinieren.
     const libUris = new Set(input.library.map((t) => t.uri));
     const validCandidates = object.candidates.filter((c) => libUris.has(c.trackUri));
     if (validCandidates.length < 3) {
-      // LLM hat zu viele halluzinierte URIs zurückgegeben → Fallback nutzen.
+      console.warn(
+        `[dj-brain] ${choice.displayName} returned ${object.candidates.length} candidates but only ${validCandidates.length} had valid URIs — falling back to heuristic`,
+      );
       return null;
     }
 
@@ -214,14 +266,23 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
           }
         : null;
 
+    console.log(
+      `[dj-brain] ✓ ${choice.displayName} → ${validCandidates.length} candidates in ${latencyMs}ms${newMQ ? ' + new mood question' : ''}`,
+    );
+
     return {
       candidates: validCandidates.slice(0, 4),
       shouldRefreshMoodQuestion: object.shouldRefreshMoodQuestion && newMQ !== null,
       newMoodQuestion: newMQ,
-      fromLLM: true,
+      provider: choice.provider,
+      latencyMs,
     };
   } catch (err) {
-    console.warn('[dj-brain] LLM call failed, falling back to heuristic:', err);
+    const latencyMs = Date.now() - startedAt;
+    console.warn(
+      `[dj-brain] ✗ ${choice.displayName} failed after ${latencyMs}ms, falling back to heuristic:`,
+      err,
+    );
     return null;
   }
 }
@@ -328,7 +389,8 @@ export async function proposeNextCandidates(
     candidates,
     shouldRefreshMoodQuestion: mood.shouldRefreshMoodQuestion,
     newMoodQuestion: mood.newMoodQuestion,
-    fromLLM: false,
+    provider: 'heuristic',
+    latencyMs: 0,
   };
 }
 

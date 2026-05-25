@@ -38,6 +38,19 @@ export type SnapshotGuestEntry = {
   status: 'pending' | 'playing' | 'done';
 };
 
+/**
+ * Status des letzten DJ-Brain-Calls. `null` solange noch kein Track-Wechsel
+ * passiert ist. Update bei jedem Track-Wechsel — die Werte sind "frozen at
+ * last pick", nicht live.
+ */
+export type SnapshotBrainStatus = {
+  provider: 'google' | 'anthropic' | 'heuristic';
+  /** Round-Trip-Zeit in ms beim letzten Call (0 bei Heuristik). */
+  latencyMs: number;
+  /** Wall-clock-Zeit des letzten Calls. */
+  at: number;
+};
+
 export type StateSnapshot = {
   /** Wall-clock-Zeit der Snapshot-Erstellung (ms). Client interpoliert progressMs darüber. */
   snapshotAt: number;
@@ -55,6 +68,8 @@ export type StateSnapshot = {
   activePlaylists: string[];
   /** Aktive Gast-Wünsche (pending + playing), in Submission-Reihenfolge. */
   guestQueue: SnapshotGuestEntry[];
+  /** Status des letzten DJ-Brain-Calls; null bis zum ersten Track-Wechsel. */
+  brain: SnapshotBrainStatus | null;
 };
 
 export type ButtonEvent =

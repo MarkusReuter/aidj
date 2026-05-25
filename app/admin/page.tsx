@@ -5,6 +5,7 @@ import {
   isConnected,
   SpotifyNotConnectedError,
 } from '@/lib/spotify';
+import BrainStatus from './BrainStatus';
 import ConnectionStatus from './ConnectionStatus';
 import LibraryEditor from './LibraryEditor';
 import PlaylistPicker from './PlaylistPicker';
@@ -56,6 +57,7 @@ export default async function AdminPage() {
   return (
     <main className="mx-auto max-w-7xl p-6">
       <ConnectionStatus status={spotifyStatus} />
+      <BrainStatus />
       {spotifyStatus.connected && spotifyStatus.hasPlaylistScope && (
         <PlaylistPicker />
       )}

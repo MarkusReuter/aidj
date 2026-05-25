@@ -26,7 +26,11 @@ import {
 } from './guest-queue';
 import { loadLibrary, type LibraryTrack } from './library';
 import { MOCK_MOOD_QUESTIONS, type MoodQuestion } from './mock-data';
-import type { SnapshotTrack, StateSnapshot } from './server-state-types';
+import type {
+  SnapshotBrainStatus,
+  SnapshotTrack,
+  StateSnapshot,
+} from './server-state-types';
 import {
   addToQueue,
   getCurrentTrack,
@@ -80,6 +84,8 @@ type InternalState = {
   partyStartedAt: number;
   /** Rolling Log der Button-Klicks für recency-weighted Aggregation. */
   buttonLog: ButtonLogEntry[];
+  /** Letzter DJ-Brain-Status (Provider + Latenz); für Admin-Badge via SSE. */
+  lastBrain: SnapshotBrainStatus | null;
 };
 
 const state: InternalState = {
@@ -101,6 +107,7 @@ const state: InternalState = {
   history: [],
   partyStartedAt: Date.now(),
   buttonLog: [],
+  lastBrain: null,
 };
 
 const emitter = new EventEmitter();
@@ -198,6 +205,12 @@ async function pickCandidatesViaBrain(
       state.tracksUntilMoodSwitch = TRACKS_PER_MOOD_QUESTION;
     }
 
+    state.lastBrain = {
+      provider: result.provider,
+      latencyMs: result.latencyMs,
+      at: Date.now(),
+    };
+
     const candidates: SnapshotTrack[] = [];
     const reasonings: Record<string, string> = {};
     for (const c of result.candidates) {
@@ -254,6 +267,7 @@ function buildSnapshot(): StateSnapshot {
       submittedAt: e.submittedAt,
       status: e.status,
     })),
+    brain: state.lastBrain,
   };
 }
 
