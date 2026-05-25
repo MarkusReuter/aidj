@@ -42,8 +42,8 @@ yarn-error.log*
 credentials*.json
 secrets*.json
 
-# Spotify token cache (siehe PLAN.md Phase 3 — Refresh-Token wird unter ~/.dj-app/ gespeichert)
-/.dj-app/
+# Spotify token cache (siehe PLAN.md Phase 3 — Refresh-Token wird unter ~/.aidj-app/ gespeichert)
+/.aidj-app/
 
 # vercel
 .vercel

@@ -324,14 +324,14 @@ Hybrid-Ansatz wie gewünscht: BPM von Drittquelle, Genre von Spotify, Mood manue
 
 **`app/api/spotify/`**:
 - `auth/route.ts` — startet OAuth-Flow, redirect zu Spotify.
-- `callback/route.ts` — empfängt Code, tauscht gegen Access+Refresh Token, speichert in `~/.dj-app/token.json` mit `chmod 0600` (Datei enthält Refresh-Token, das per se kein Login-Secret ist, aber trotzdem nur dem User gehört).
+- `callback/route.ts` — empfängt Code, tauscht gegen Access+Refresh Token, speichert in `~/.aidj-app/token.json` mit `chmod 0600` (Datei enthält Refresh-Token, das per se kein Login-Secret ist, aber trotzdem nur dem User gehört).
 - `devices/route.ts` — `GET` listet aktive Connect-Devices.
 - `select-device/route.ts` — `POST { deviceId }` setzt aktives Playback-Device.
 - `queue/route.ts` — `POST { uri }` ruft `PUT /me/player/queue?uri=…` auf.
 - `now-playing/route.ts` — `GET` proxiert `/me/player` (Track + Progress + isPlaying).
 
 **`lib/spotify.ts`** — Wrapper-Modul:
-- `getClient()` — gibt SDK-Instanz mit Auto-Refresh zurück (lädt Token aus `~/.dj-app/token.json`, refresht bei 401 und schreibt neue Tokens zurück).
+- `getClient()` — gibt SDK-Instanz mit Auto-Refresh zurück (lädt Token aus `~/.aidj-app/token.json`, refresht bei 401 und schreibt neue Tokens zurück).
 - `addToQueue(uri)`, `skip()`, `getCurrentTrack()`, `getDevices()`.
 
 Polling-Strategie für Now-Playing: kein Browser-Polling, sondern **Server-side** ein Interval (alle 5 s), das den State im Memory updated und via SSE an alle verbundenen Tablets pusht. **Polling läuft nur, solange ≥ 1 SSE-Client connected ist** — beim Connect des ersten Tablets startet der Interval, beim Disconnect des letzten wird er gestoppt. Spart Spotify-API-Quota und verhindert, dass die App auch ohne Party stillschweigend Calls feuert. (Spotify-Rate-Limit liegt bei ~180 req/min/app — bei 5s-Interval = 12 req/min, völlig unkritisch, aber das Pause-Verhalten ist ohnehin sauberer.)

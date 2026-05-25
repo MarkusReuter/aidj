@@ -31,7 +31,7 @@ Bau keine Phase 3/5-Features in Phase-1-Code rein. Wenn etwas einen API-Key brä
 ```
 SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI, ANTHROPIC_API_KEY
 ```
-Spotify-Refresh-Token wird in `~/.dj-app/token.json` mit `chmod 0600` gespeichert — nicht im Repo.
+Spotify-Refresh-Token wird in `~/.aidj-app/token.json` mit `chmod 0600` gespeichert — nicht im Repo.
 
 ## Dev
 
