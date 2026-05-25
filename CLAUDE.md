@@ -6,7 +6,7 @@ Touch-only Tablet-App für Partys: Claude wählt Tracks vor, Crowd tippt auf iPa
 
 ## Heutiger Stand
 
-Phase 1 (Tablet-UI), Phase 1a (Phone-UI + UA-Routing + DJ-Mode) und Phase 2 (Library-Editor + `build-library`-Skript) sind durch. `data/library.json` existiert als Mock-Library aus den 15 MOCK_TRACKS — der Editor unter `/admin` funktioniert ohne API-Keys gegen diese Demo-Library. Spotify-OAuth (Phase 3) und Claude-DJ-Brain (Phase 5) sind **noch nicht** verdrahtet. `.env.local` ist nicht angelegt; `build-library` läuft erst wenn Spotify-Credentials da sind.
+Phase 1 (Tablet-UI), Phase 1a (Phone-UI + UA-Routing + DJ-Mode), Phase 2 (Library-Editor + `build-library`-Skript), Phase 3 (Spotify-OAuth + Proxy) und Phase 4 (Server-State + SSE-Pipeline) sind durch. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync); Kandidaten kommen zufällig aus `data/library.json` als Stand-in für den DJ-Brain. Tap auf eine Kandidaten-Karte queued den Track tatsächlich in Spotify (`/api/queue/commit`). Phase 4a (Gast-Queue-Server-State) und Phase 5 (Claude-DJ-Brain + Lock-Window + echter Skip) sind **noch nicht** verdrahtet.
 
 ## Liefer-Reihenfolge (wichtig)
 
@@ -52,13 +52,22 @@ app/             Root-Page (UA-Sniff → /tablet | /phone) + Layout
   tablet/        Tablet-Frontend (das, was auf dem iPad läuft)
   phone/         Phone-Frontend (Portrait, User-Mode + DJ-Mode-Hidden-Tap-Unlock)
   admin/         Library-Editor am Mac (Mood-Tags + Energy taggen)
-  api/           Server-Routen (lan-url, library; Spotify-Proxy + SSE ab Phase 3/4)
+  api/
+    lan-url/     LAN-IP-Detection für QR-Code
+    library/     Library load/save
+    spotify/     OAuth (auth, callback) + Proxy (devices, select-device, queue, now-playing)
+    state/       stream (SSE) + button (mood/playlist/anti)
+    queue/       commit (Candidate-Tap → Spotify Queue + committedId)
 components/      NowPlayingBar, NextUpCandidates, MoodSection, PlaylistModal, AntiButtons, WifiQrCode
   phone/         PhoneTopBar, NowPlayingCard, HeartbeatBadge, GuestQueueList, …
-lib/             mock-data.ts + mock-loop.ts (Tablet+Phone Shared-State, Demo-Loop)
+lib/             mock-data.ts (15 Mock-Tracks + Mood-Fragen)
                  library-schema.ts (Zod, Client-Safe) + library.ts (fs-Wrapper, Server-Only)
+                 spotify.ts (Token-Storage in ~/.aidj-app/ + Wrapper, Server-Only)
+                 state.ts (Party-State-Singleton + EventEmitter + 5s-Polling, Server-Only)
+                 server-state-types.ts (SSE-Wire-Format, Client-Safe)
+                 use-server-state.ts ('use client'-Hook auf EventSource)
                  phone/ (guest-id, guest-name, dj-mode)
-                 → spotify.ts, dj-brain.ts, state.ts kommen in Phase 3-5
+                 → dj-brain.ts kommt in Phase 5
 data/            mock-covers.json, library.json (kuratierte Track-Library für DJ-Brain)
 scripts/         fetch-mock-covers.ts, build-library.ts
 public/          PWA-Manifest, Icons

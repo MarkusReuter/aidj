@@ -16,11 +16,9 @@ function formatTime(ms: number): string {
 }
 
 export default function NowPlayingBar({ track, progressMs }: Props) {
-  // Demo-Loop: Tracks "enden" nach 5% der eigentlichen Dauer.
-  // Progressbar fuellt sich relativ zu dieser Demo-Dauer aus, damit sie sichtbar laeuft.
-  const demoDurationMs = track.durationMs * 0.05;
-  const clampedProgress = Math.min(progressMs, demoDurationMs);
-  const progressPct = demoDurationMs > 0 ? (clampedProgress / demoDurationMs) * 100 : 0;
+  const clampedProgress = Math.min(progressMs, track.durationMs);
+  const progressPct =
+    track.durationMs > 0 ? (clampedProgress / track.durationMs) * 100 : 0;
 
   return (
     <section className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 p-2 select-none">
@@ -75,7 +73,7 @@ export default function NowPlayingBar({ track, progressMs }: Props) {
               />
             </div>
             <span className="font-mono text-xs text-zinc-400 tabular-nums">
-              {formatTime(demoDurationMs)}
+              {formatTime(track.durationMs)}
             </span>
           </div>
         </div>

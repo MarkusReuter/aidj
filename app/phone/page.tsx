@@ -3,7 +3,7 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { MOCK_PLAYLISTS, MOCK_TRACKS, type Track } from '@/lib/mock-data';
-import { useMockLoop } from '@/lib/mock-loop';
+import { useServerState } from '@/lib/use-server-state';
 import { useDjMode } from '@/lib/phone/dj-mode';
 import { useGuestId } from '@/lib/phone/guest-id';
 import { useGuestName } from '@/lib/phone/guest-name';
@@ -84,13 +84,14 @@ export default function PhonePage() {
     currentQuestion,
     autoPickInSec,
     toast,
+    spotifyConnected,
     onCandidateTap,
     onMoodPress,
     onPlaylistToggle,
     onSkip,
     onDislike,
     onLove,
-  } = useMockLoop();
+  } = useServerState();
 
   const { isDj, registerTap } = useDjMode();
   const guestId = useGuestId();
@@ -151,8 +152,20 @@ export default function PhonePage() {
 
   if (!currentTrack || !currentQuestion) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-black text-zinc-400">
-        <p>Lade Mock-Daten...</p>
+      <main className="mx-auto flex min-h-dvh max-w-md flex-col items-center justify-center gap-3 bg-black px-6 text-center text-zinc-400">
+        {!spotifyConnected ? (
+          <>
+            <p className="text-xl text-zinc-300">Spotify nicht verbunden</p>
+            <p className="text-sm">Der Host muss am Mac den Login-Flow durchlaufen.</p>
+          </>
+        ) : !currentTrack ? (
+          <>
+            <p className="text-xl text-zinc-300">Gerade läuft nichts</p>
+            <p className="text-sm">Warte, bis der Host einen Track startet.</p>
+          </>
+        ) : (
+          <p>Verbinde...</p>
+        )}
       </main>
     );
   }

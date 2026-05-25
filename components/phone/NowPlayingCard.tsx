@@ -16,10 +16,9 @@ function formatTime(ms: number): string {
 }
 
 export default function NowPlayingCard({ track, progressMs }: Props) {
-  const demoDurationMs = track.durationMs * 0.05;
-  const clampedProgress = Math.min(progressMs, demoDurationMs);
+  const clampedProgress = Math.min(progressMs, track.durationMs);
   const progressPct =
-    demoDurationMs > 0 ? (clampedProgress / demoDurationMs) * 100 : 0;
+    track.durationMs > 0 ? (clampedProgress / track.durationMs) * 100 : 0;
 
   return (
     <section className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/80 p-4 select-none">
@@ -67,7 +66,7 @@ export default function NowPlayingCard({ track, progressMs }: Props) {
             />
           </div>
           <span className="font-mono text-xs text-zinc-500 tabular-nums">
-            {formatTime(demoDurationMs)}
+            {formatTime(track.durationMs)}
           </span>
         </div>
       </div>

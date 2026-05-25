@@ -2,7 +2,7 @@
 
 import { useState, type CSSProperties } from 'react';
 import { MOCK_PLAYLISTS } from '@/lib/mock-data';
-import { useMockLoop } from '@/lib/mock-loop';
+import { useServerState } from '@/lib/use-server-state';
 import NowPlayingBar from '@/components/NowPlayingBar';
 import NextUpCandidates from '@/components/NextUpCandidates';
 import MoodSection from '@/components/MoodSection';
@@ -27,13 +27,15 @@ export default function TabletPage() {
     currentQuestion,
     autoPickInSec,
     toast,
+    spotifyConnected,
+    deviceName,
     onCandidateTap,
     onMoodPress,
     onPlaylistToggle,
     onSkip,
     onDislike,
     onLove,
-  } = useMockLoop();
+  } = useServerState();
 
   const [playlistModalOpen, setPlaylistModalOpen] = useState(false);
 
@@ -42,8 +44,33 @@ export default function TabletPage() {
 
   if (!currentTrack || !currentQuestion) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-black text-zinc-400">
-        <p>Lade Mock-Daten...</p>
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-black px-6 text-center text-zinc-400">
+        {!spotifyConnected ? (
+          <>
+            <p className="text-xl text-zinc-300">Spotify nicht verbunden</p>
+            <p className="text-sm">
+              Öffne am Mac{' '}
+              <a
+                href="/api/spotify/auth"
+                className="text-purple-400 underline"
+              >
+                /api/spotify/auth
+              </a>{' '}
+              und durchlaufe den Login-Flow.
+            </p>
+          </>
+        ) : !currentTrack ? (
+          <>
+            <p className="text-xl text-zinc-300">Spotify spielt gerade nichts</p>
+            <p className="text-sm">
+              Starte einen ersten Track in der Spotify-App
+              {deviceName ? ` (Device: ${deviceName})` : ''}, danach übernimmt
+              die Crowd.
+            </p>
+          </>
+        ) : (
+          <p>Lade Snapshot...</p>
+        )}
       </main>
     );
   }

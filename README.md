@@ -6,7 +6,7 @@ Das hier ist eine **lokal gehostete App** — keine Cloud, kein Account-Service.
 
 ## Status
 
-Reifegrad: **Mock-Demo + Spotify-Plumbing** — alles, was du sehen würdest, klickt sich durch; die Verdrahtung zwischen Tablet/Phone und echter Spotify-Queue ist noch nicht fertig.
+Reifegrad: **Spotify end-to-end, DJ-Brain noch Random** — Tablet/Phone zeigen echten Spotify-Track, Tap auf eine Kandidaten-Karte queued ihn wirklich. Die Track-Auswahl ist noch zufällig (kein LLM-Reasoning).
 
 - ✅ Tablet-UI (Landscape, 4 Kandidaten-Karten, Mood-Buttons, Playlist-Toggles, Anti-Buttons)
 - ✅ Phone-UI (Portrait, Track-Suche, Gast-Queue, Hidden-DJ-Mode via 10× Tap aufs Logo)
@@ -14,9 +14,10 @@ Reifegrad: **Mock-Demo + Spotify-Plumbing** — alles, was du sehen würdest, kl
 - ✅ Library-Editor unter `/admin` (Mood-Tags + Energy taggen)
 - ✅ `build-library`-Skript (Spotify-Playlists → `data/library.json` + BPM via GetSongBPM)
 - ✅ Spotify-OAuth-Flow + API-Proxy (Queue, Now-Playing, Devices, Transfer-Playback)
-- 🔧 SSE-Pipeline + echter Server-State (Tablet/Phone laufen heute auf Mock-Loop)
-- 🔧 Claude-DJ-Brain (heute statische Mock-Kandidaten)
+- ✅ SSE-Pipeline + Server-State (Multi-Client-Sync, Spotify-Polling, Mood/Playlist serverseitig)
+- 🔧 Claude-DJ-Brain (heute Random-Kandidaten aus Library statt LLM)
 - 🔧 Gast-Queue-Server-State (heute Phone-lokal)
+- 🔧 Skip-Button + Lock-Window 10 s vor Track-Ende (kommt mit DJ-Brain)
 
 Vollständige Roadmap mit Begründungen in [PLAN.md](./PLAN.md).
 
@@ -220,9 +221,14 @@ app/             Next.js App Router (UI + API Routes)
     lan-url/     LAN-IP-Detection für QR-Code
     library/     Library load/save
     spotify/     OAuth + Proxy (auth, callback, devices, queue, now-playing)
+    state/       SSE-Stream + Button-Mutations
+    queue/       Candidate-Commit (→ Spotify Queue)
 components/      Geteilte Touch-Komponenten + phone/-Untermodule
-lib/             mock-data, mock-loop, library-schema/library (fs),
+lib/             mock-data, library-schema/library (fs),
                  spotify.ts (Token-Storage + Wrapper),
+                 state.ts (Server-State-Singleton + EventEmitter),
+                 server-state-types.ts (Wire-Format, client-safe),
+                 use-server-state.ts (Client-Hook auf EventSource),
                  phone/ (guest-id, guest-name, dj-mode)
 data/            mock-covers.json, library.json
 scripts/         fetch-mock-covers.ts, build-library.ts
