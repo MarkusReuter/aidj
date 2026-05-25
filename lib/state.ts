@@ -410,10 +410,32 @@ export function subscribe(handler: SnapshotHandler): {
 // Mutation-API für die /api/state/*-Routen.
 
 function logButton(entry: Omit<ButtonLogEntry, 'timestamp'>): void {
-  state.buttonLog.push({ ...entry, timestamp: Date.now() });
+  state.buttonLog.push({
+    ...entry,
+    timestamp: Date.now(),
+    // Mood-/Playlist-Klicks bekommen den aktuell laufenden Track für die
+    // /history-Page; die anti-Variante hat die URI schon selbst (siehe Caller).
+    trackUri: entry.trackUri ?? state.lastTrackUri ?? undefined,
+  });
   if (state.buttonLog.length > BUTTON_LOG_MAX) {
     state.buttonLog = state.buttonLog.slice(-BUTTON_LOG_MAX);
   }
+}
+
+/**
+ * Read-Only Read-Out vom Button-Log für die /history-Page. Schließt die
+ * lib/state.ts-Internals von der Page ab.
+ */
+export function getButtonLog(): ReadonlyArray<ButtonLogEntry> {
+  return state.buttonLog.slice();
+}
+
+export function getPlayHistory(): ReadonlyArray<string> {
+  return state.history.slice();
+}
+
+export function getPartyStartedAt(): number {
+  return state.partyStartedAt;
 }
 
 export function recordMoodPress(value: string): void {
