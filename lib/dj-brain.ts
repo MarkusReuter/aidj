@@ -18,11 +18,10 @@
  * Server-only.
  */
 
-import { anthropic } from '@ai-sdk/anthropic';
-import { google } from '@ai-sdk/google';
-import { generateObject, type LanguageModel } from 'ai';
+import { generateObject } from 'ai';
 import { z } from 'zod';
 import type { LibraryTrack } from './library-schema';
+import { pickModel } from './llm-provider';
 import { MOCK_MOOD_QUESTIONS, type MoodQuestion } from './mock-data';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -153,37 +152,6 @@ function libraryForPrompt(lib: LibraryTrack[]): LibraryPromptEntry[] {
     energyLevel: t.energyLevel,
     genres: t.spotifyGenres,
   }));
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Provider-Auswahl. Gemini hat Vorrang (Free-Tier), Anthropic-Fallback.
-// ─────────────────────────────────────────────────────────────────────────────
-
-type ModelChoice = {
-  model: LanguageModel;
-  /** Für Logging + um den Anthropic-spezifischen Prompt-Cache nur dort zu setzen. */
-  provider: 'google' | 'anthropic';
-  displayName: string;
-};
-
-function pickModel(): ModelChoice | null {
-  const geminiKey = process.env.GOOGLE_GENERATIVE_AI_API_KEY?.trim();
-  if (geminiKey) {
-    return {
-      model: google('gemini-2.5-flash'),
-      provider: 'google',
-      displayName: 'Gemini 2.5 Flash',
-    };
-  }
-  const anthropicKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (anthropicKey) {
-    return {
-      model: anthropic('claude-sonnet-4-6'),
-      provider: 'anthropic',
-      displayName: 'Claude Sonnet 4.6',
-    };
-  }
-  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

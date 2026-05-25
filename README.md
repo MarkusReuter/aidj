@@ -11,15 +11,16 @@ Reifegrad: **end-to-end spielbar** — Tablet/Phone zeigen echten Spotify-Track,
 - ✅ Tablet-UI (Landscape, 4 Kandidaten-Karten, Mood-Buttons, Playlist-Toggles, Anti-Buttons)
 - ✅ Phone-UI (Portrait, Track-Suche, Gast-Queue, Hidden-DJ-Mode via 10× Tap aufs Logo)
 - ✅ UA-Routing auf `/` (Phone → `/phone`, sonst → `/tablet`)
-- ✅ Library-Editor + Playlist-Picker unter `/admin` (Mood-Tags + Energy taggen, Library additiv aus Spotify-Playlists bauen)
+- ✅ Library-Editor + Playlist-Picker unter `/admin` (Mood-Tags + Energy manuell taggen oder via LLM auto-taggen, Library additiv aus Spotify-Playlists bauen)
 - ✅ `build-library`-Skript als Power-User-Fallback (Spotify-Playlists → `data/library.json` + BPM via GetSongBPM)
 - ✅ Spotify-OAuth-Flow + API-Proxy (Queue, Now-Playing, Devices, Transfer-Playback, Search)
 - ✅ SSE-Pipeline + Server-State (Multi-Client-Sync, Spotify-Polling, Mood/Playlist serverseitig)
-- ✅ Gast-Queue-Server-State (FIFO + 1-Slot-Quota + Idempotenz, Phone-Submission via `/api/guest/submit`)
-- ✅ DJ-Brain mit zwei LLM-Providern (Google Gemini **oder** Anthropic Claude) + Heuristik-Fallback bei fehlendem Key
+- ✅ Gast-Queue-Server-State (FIFO + 1-Slot-Quota + Idempotenz + Max-10-pending + 15-min-Pending-Timeout, Phone-Submission via `/api/guest/submit`)
+- ✅ DJ-Brain mit zwei LLM-Providern (Google Gemini **oder** Anthropic Claude) + Heuristik-Fallback bei fehlendem Key, Live-Provider-Badge im `/admin`
 - ✅ Lock-Window 10 s vor Track-Ende (Auto-Pick wird in Spotify-Queue gepusht), echter Skip-Button
+- ✅ History-Post-Mortem unter `/history` (was lief, mit welchen Brain-Reasonings)
 
-Vollständige Roadmap mit Begründungen in [PLAN.md](./PLAN.md).
+Architektur-Details in [CLAUDE.md](./CLAUDE.md) (Repo-Onboarding) und [AGENTS.md](./AGENTS.md) (Next.js-Version-Hinweise).
 
 ## Voraussetzungen
 
@@ -140,7 +141,14 @@ npm run dev
 # Browser: http://localhost:3000/admin
 ```
 
-Pro Track Mood-Tags (warm-up, peak, banger, feelgood, …) und Energy-Level (1–10) setzen. Spart dir nicht extrem viel — der LLM kommt auch ohne klar — aber gibt ihm zusätzliches Signal für sauberere Übergänge.
+Pro Track Mood-Tags (warm-up, peak, banger, feelgood, …) und Energy-Level (1–10) setzen.
+
+**Zwei Wege:**
+
+- **🪄 Auto-Tag-Button** (im LibraryEditor oben): wenn du Schritt 7 schon erledigt hast (LLM-Key gesetzt), schlägt der LLM für alle ungetaggten Tracks Mood-Tags + Energy vor. Du reviewst die Vorschläge im Editor und klickst dann "Speichern" — bis dahin ist nichts persistiert, du kannst einzelne Tracks noch korrigieren. Spart bei 100–300 Tracks Stunden Hand-Arbeit.
+- **Manuell**: pro Track Pills toggeln + Slider ziehen. Wenn du mit dem LLM-Ergebnis nicht zufrieden bist oder es feinjustieren willst.
+
+Tagging spart dir nicht extrem viel — der LLM kommt auch ohne Tags klar (er nutzt dann `spotifyGenres` + BPM als Backup) — aber gibt ihm zusätzliches Signal für sauberere Übergänge und macht den Heuristik-Fallback (ohne LLM-Key) erst wirklich brauchbar.
 
 ### 7. DJ-Brain aktivieren (LLM-Key setzen)
 
@@ -273,7 +281,7 @@ Phone ─┘                  ↓                                               
 
 Der Server ist die einzige Komponente, die mit Spotify und dem LLM redet. Tablet und Phones sind reine UI-Frontends, die via WLAN auf ihn zugreifen. Token + State liegen ausschließlich auf dem Server.
 
-Volle Architektur-Diagramme + Begründungen in [PLAN.md](./PLAN.md).
+Tiefere Architektur-Notizen für AI-Coding-Agents in [CLAUDE.md](./CLAUDE.md).
 
 ## Troubleshooting
 
@@ -300,12 +308,14 @@ Volle Architektur-Diagramme + Begründungen in [PLAN.md](./PLAN.md).
 app/             Next.js App Router (UI + API Routes)
   tablet/        Tablet-Frontend (Landscape, touch-only)
   phone/         Phone-Frontend (Portrait, Gast + Hidden-DJ)
-  admin/         Library-Editor
+  admin/         Library-Editor + Playlist-Picker + Brain-Status-Badge + Auto-Tag-Button
+  history/       Post-Mortem-Page (was lief inkl. Brain-Reasoning)
   api/
     lan-url/     LAN-IP-Detection für QR-Code
-    library/     Library load/save
-    spotify/     OAuth + Proxy (auth, callback, devices, queue, now-playing)
-    state/       SSE-Stream + Button-Mutations
+    library/     Library load/save + build (SSE-Stream) + auto-tag (LLM)
+    search/      Phone-Suche (Library + Spotify, LRU-Cache)
+    spotify/     OAuth + Proxy (auth, callback, devices, queue, now-playing, status, playlists)
+    state/       SSE-Stream + Button-Mutations + Skip
     queue/       Candidate-Commit (→ Spotify Queue, Host-Privileg)
     guest/       Phone-Submit (FIFO-Queue + 1-Slot-Quota pro Gast)
 components/      Geteilte Touch-Komponenten + phone/-Untermodule
@@ -314,12 +324,14 @@ lib/             mock-data, library-schema/library (fs),
                  state.ts (Server-State-Singleton + EventEmitter),
                  server-state-types.ts (Wire-Format, client-safe),
                  use-server-state.ts (Client-Hook auf EventSource),
-                 guest-queue.ts (FIFO + Mutex + Quota für Phone-Submissions),
+                 guest-queue.ts (FIFO + Mutex + Quota + 15-min-Pending-Timeout),
+                 dj-brain.ts (LLM-Kandidaten + Heuristik-Fallback),
+                 llm-provider.ts (Gemini/Anthropic-Provider-Auswahl),
+                 library-build.ts (Build-Orchestrator + Job-Registry),
                  phone/ (guest-id, guest-name, dj-mode)
 data/            mock-covers.json, library.json
 scripts/         fetch-mock-covers.ts, build-library.ts
 public/          PWA-Manifest, Icons
-PLAN.md          Vollständiger Implementationsplan + Phasen-Reihenfolge
 AGENTS.md        Next.js-Versionshinweise für AI-Coding-Agents
 CLAUDE.md        Repo-Onboarding für Claude Code
 ```

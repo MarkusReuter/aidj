@@ -10,7 +10,10 @@
  *   - **Idempotenz**: gleiche `submissionId` innerhalb 30 s → vorhandener
  *     Entry wird zurückgegeben (Schutz vor Netzwerk-Retry / Doppel-Tap).
  *   - **Maximale Queue-Länge**: 10 pending-Entries gleichzeitig
- *     (Anti-Trolling-Limit aus PLAN.md, finale Zahl noch offen).
+ *     (Anti-Trolling-Limit). Bei voller Queue: `queue_full`.
+ *   - **Pending-Timeout**: Entries, die nach 15 min noch in `pending` stehen
+ *     (Submitter ist offline / Spotify hat den Slot übersprungen), werden
+ *     lazy bei jeder Queue-Operation auf `done` markiert. Quota wird frei.
  *   - **Atomare Writes**: alle Mutationen laufen durch einen Promise-Chain-
  *     Mutex, damit zwei Phones, die gleichzeitig dieselbe Karte tippen,
  *     deterministisch serialisiert werden.
@@ -49,9 +52,25 @@ export type EnqueueResult =
 
 const IDEMPOTENCY_TTL_MS = 30_000;
 const MAX_PENDING = 10;
+const PENDING_TIMEOUT_MS = 15 * 60 * 1000;
 
 let entries: GuestEntry[] = [];
 let mutex: Promise<unknown> = Promise.resolve();
+
+/**
+ * Markiert pending-Entries, die älter als PENDING_TIMEOUT_MS sind, als `done`.
+ * Wird vor jeder Queue-Operation aufgerufen — billig (Array-Scan), kein
+ * separater Timer nötig. Ohne Operations bleiben stale Entries im Snapshot
+ * sichtbar, was OK ist: sobald wieder jemand interagiert, ist es weg.
+ */
+function sweepStale(now: number = Date.now()): void {
+  const cutoff = now - PENDING_TIMEOUT_MS;
+  for (const e of entries) {
+    if (e.status === 'pending' && e.submittedAt < cutoff) {
+      e.status = 'done';
+    }
+  }
+}
 
 function withMutex<T>(fn: () => T | Promise<T>): Promise<T> {
   const next = mutex.then(fn, fn);
@@ -82,6 +101,7 @@ export async function enqueue(input: {
 }): Promise<EnqueueResult> {
   return withMutex(() => {
     const now = Date.now();
+    sweepStale(now);
     // Idempotency — gleicher Request kommt nochmal (Netzwerk-Retry).
     const existing = entries.find((e) => e.submissionId === input.submissionId);
     if (existing && now - existing.submittedAt < IDEMPOTENCY_TTL_MS) {
@@ -135,6 +155,7 @@ export async function rollback(submissionId: string): Promise<void> {
 }
 
 export function peekNext(): GuestEntry | null {
+  sweepStale();
   const pending = entries.find((e) => e.status === 'pending');
   return pending ?? null;
 }
@@ -145,6 +166,7 @@ export function peekNext(): GuestEntry | null {
  * → no-op.
  */
 export function markPlaying(trackUri: string): void {
+  sweepStale();
   const entry = entries.find(
     (e) => e.trackUri === trackUri && e.status === 'pending',
   );
@@ -158,6 +180,7 @@ export function markPlaying(trackUri: string): void {
  * Entry mit derselben URI ab.
  */
 export function markDone(trackUri: string): void {
+  sweepStale();
   const entry =
     entries.find((e) => e.trackUri === trackUri && e.status === 'playing') ??
     entries.find((e) => e.trackUri === trackUri && e.status === 'pending');
@@ -166,6 +189,7 @@ export function markDone(trackUri: string): void {
 
 /** Aktive Entries (alles außer `done`), in Submission-Reihenfolge. */
 export function listActive(): GuestEntry[] {
+  sweepStale();
   return entries.filter((e) => e.status !== 'done');
 }
 

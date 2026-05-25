@@ -14,6 +14,22 @@ type SaveState =
   | { kind: 'saved'; trackCount: number; at: number }
   | { kind: 'error'; message: string };
 
+type AutoTagState =
+  | { kind: 'idle' }
+  | { kind: 'running'; requested: number }
+  | {
+      kind: 'done';
+      tagged: number;
+      requested: number;
+      errors: string[];
+      at: number;
+    }
+  | { kind: 'error'; message: string };
+
+function isUntagged(t: LibraryTrack): boolean {
+  return t.moodTags.length === 0 && t.energyLevel === null;
+}
+
 type Props = {
   initialLibrary: Library;
 };
@@ -39,10 +55,18 @@ export default function LibraryEditor({ initialLibrary }: Props) {
     initialLibrary.tracks,
   );
   const [saveState, setSaveState] = useState<SaveState>({ kind: 'idle' });
+  const [autoTagState, setAutoTagState] = useState<AutoTagState>({
+    kind: 'idle',
+  });
 
   const isDirty = useMemo(
     () => !tracksEqual(tracks, baseline),
     [tracks, baseline],
+  );
+
+  const untaggedUris = useMemo(
+    () => tracks.filter(isUntagged).map((t) => t.uri),
+    [tracks],
   );
 
   const updateTrack = useCallback(
@@ -84,6 +108,55 @@ export default function LibraryEditor({ initialLibrary }: Props) {
     if (!ok) return;
     setTracks([]);
   }, [tracks.length]);
+
+  const onAutoTag = useCallback(async () => {
+    if (untaggedUris.length === 0 || autoTagState.kind === 'running') return;
+    setAutoTagState({ kind: 'running', requested: untaggedUris.length });
+    try {
+      const res = await fetch('/api/library/auto-tag', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uris: untaggedUris }),
+      });
+      const body = (await res.json().catch(() => ({}))) as {
+        tagged?: { uri: string; moodTags: MoodTag[]; energyLevel: number }[];
+        errors?: string[];
+        message?: string;
+        requested?: number;
+      };
+      if (!res.ok) {
+        setAutoTagState({
+          kind: 'error',
+          message: body.message ?? `HTTP ${res.status}`,
+        });
+        return;
+      }
+      const tagged = body.tagged ?? [];
+      // Suggestions in den lokalen State patchen — User muss "Speichern" klicken
+      // damit es persistiert wird. So bleibt Auto-Tagging reviewable + undo-bar.
+      const patches = new Map(
+        tagged.map((t) => [t.uri, { moodTags: t.moodTags, energyLevel: t.energyLevel }]),
+      );
+      setTracks((prev) =>
+        prev.map((t) => {
+          const patch = patches.get(t.uri);
+          return patch ? { ...t, ...patch } : t;
+        }),
+      );
+      setAutoTagState({
+        kind: 'done',
+        tagged: tagged.length,
+        requested: body.requested ?? untaggedUris.length,
+        errors: body.errors ?? [],
+        at: Date.now(),
+      });
+    } catch (err) {
+      setAutoTagState({
+        kind: 'error',
+        message: err instanceof Error ? err.message : 'Unbekannter Fehler',
+      });
+    }
+  }, [untaggedUris, autoTagState.kind]);
 
   const onSave = useCallback(async () => {
     setSaveState({ kind: 'saving' });
@@ -136,7 +209,33 @@ export default function LibraryEditor({ initialLibrary }: Props) {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <AutoTagStatusBadge state={autoTagState} />
           <SaveStatusBadge state={saveState} dirty={isDirty} />
+          <button
+            type="button"
+            onClick={onAutoTag}
+            disabled={
+              untaggedUris.length === 0 ||
+              autoTagState.kind === 'running' ||
+              saveState.kind === 'saving'
+            }
+            className="inline-flex items-center gap-2 rounded-md border border-sky-900/60 bg-sky-950/40 px-3 py-2 text-sm font-medium text-sky-200 hover:bg-sky-900/40 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
+            title={
+              untaggedUris.length === 0
+                ? 'Alle Tracks haben schon Tags + Energy'
+                : `LLM tagt ${untaggedUris.length} ungetaggte Track(s) — review vor "Speichern" möglich`
+            }
+          >
+            {autoTagState.kind === 'running' && (
+              <span
+                aria-hidden
+                className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-current border-t-transparent"
+              />
+            )}
+            {autoTagState.kind === 'running'
+              ? `Tagge…`
+              : `🪄 Auto-Tag (${untaggedUris.length})`}
+          </button>
           <button
             type="button"
             onClick={clearAll}
@@ -243,6 +342,36 @@ function SaveStatusBadge({
     return <span className="text-xs text-amber-400">Ungespeicherte Änderungen</span>;
   }
   return <span className="text-xs text-zinc-500">Keine Änderungen</span>;
+}
+
+function AutoTagStatusBadge({ state }: { state: AutoTagState }) {
+  if (state.kind === 'idle') return null;
+  if (state.kind === 'running') {
+    return (
+      <span className="text-xs text-sky-300">
+        Auto-Tag läuft… ({state.requested} Track{state.requested === 1 ? '' : 's'})
+      </span>
+    );
+  }
+  if (state.kind === 'error') {
+    return (
+      <span className="text-xs text-red-400" title={state.message}>
+        Auto-Tag-Fehler: {state.message}
+      </span>
+    );
+  }
+  // done
+  const partial = state.tagged < state.requested;
+  return (
+    <span
+      className={`text-xs ${partial ? 'text-amber-300' : 'text-emerald-300'}`}
+      title={state.errors.join('\n') || undefined}
+    >
+      Auto-Tag: {state.tagged}/{state.requested} getaggt
+      {partial && state.errors.length > 0 && ` (${state.errors.length} Fehler)`}
+      {' — review + speichern'}
+    </span>
+  );
 }
 
 function TrackRow({

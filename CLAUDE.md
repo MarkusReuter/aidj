@@ -2,26 +2,28 @@
 
 # AIDJ — Repo-Onboarding für Claude Code
 
-Touch-only Tablet-App für Partys: Claude wählt Tracks vor, Crowd tippt auf iPad-Karten, Spotify Connect spielt ab. Voller Architektur- und Phasenplan steht in [PLAN.md](./PLAN.md) — lies den, bevor du nicht-triviale Änderungen machst.
+Touch-only Tablet-App für Partys: ein LLM (Gemini oder Claude — siehe DJ-Brain unten) wählt Tracks vor, Crowd tippt auf iPad-Karten, Spotify Connect spielt ab.
 
 ## Heutiger Stand
 
-Phasen 1, 1a, 2, 3, 3a, 4, 4a, 4b und 5 sind durch. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync); Kandidaten kommen vom DJ-Brain (`lib/dj-brain.ts`) — Claude via `@ai-sdk/anthropic` + `generateObject`, mit Heuristik-Fallback wenn `ANTHROPIC_API_KEY` fehlt (BPM-Match ±10, Tag-Overlap-Penalties aus 👎/❤️, History-Exclusion). Tablet-Tap committet direkt in die Spotify-Queue (`/api/queue/commit`, Host-Privileg); Phone-Tap geht durch die Gast-Queue (`/api/guest/submit`) mit FIFO + 1-Slot-Quota + Idempotenz. Track-Lifecycle (pending → playing → done) wird automatisch beim Spotify-Track-Wechsel gesetzt. Lock-Window pusht ~10 s vor Track-Ende den Auto-Pick (committed-Wahl oder Top-Kandidat) in die Spotify-Queue. Skip ist echt (`/api/state/skip` → `spotify.skipToNext()`). 👎/❤️ + Mood-Shift triggern Brain-Re-Rank. `/admin` zeigt einen Spotify-Verbindungsstatus-Banner und einen Playlist-Picker, der die Library **additiv** (bestehende Tracks bleiben, neue werden angehängt) via SSE-Stream baut. Phone-Suche trifft `/api/search` (Library + Spotify Web-Search gemerged, LRU-Cache 60s).
+End-to-end spielbar. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync); Kandidaten kommen vom DJ-Brain (`lib/dj-brain.ts`) — Provider-Auswahl via `lib/llm-provider.ts` (Gemini 2.5 Flash bevorzugt, Claude Sonnet 4.6 als Fallback), beide via Vercel AI SDK + `generateObject`. Heuristik-Fallback wenn kein LLM-Key gesetzt ist (BPM-Match ±10, Tag-Overlap-Penalties aus 👎/❤️, History-Exclusion). Tablet-Tap committet direkt in die Spotify-Queue (`/api/queue/commit`, Host-Privileg); Phone-Tap geht durch die Gast-Queue (`/api/guest/submit`) mit FIFO + 1-Slot-Quota + Idempotenz + Max-10-pending + 15-min-Pending-Timeout (lazy-sweep). Track-Lifecycle (pending → playing → done) wird automatisch beim Spotify-Track-Wechsel gesetzt. Lock-Window pusht ~10 s vor Track-Ende den Auto-Pick (committed-Wahl oder Top-Kandidat) in die Spotify-Queue. Skip ist echt (`/api/state/skip` → `spotify.skipToNext()`). 👎/❤️ + Mood-Shift triggern Brain-Re-Rank. `/admin` zeigt Spotify-ConnectionStatus + Brain-Provider-Live-Badge + Playlist-Picker (additiver Library-Build via SSE-Stream) + LibraryEditor mit Auto-Tag-Button (LLM schlägt `moodTags` + `energyLevel` pro ungetaggtem Track vor, User reviewt + speichert). `/history` ist die Post-Mortem-Page. Phone-Suche trifft `/api/search` (Library + Spotify Web-Search gemerged, LRU-Cache 60 s).
 
-**Spotify-Dev-Mode-Restrictions (2025/2026)**: Mehrere Endpoints geben für non-production-Apps 403 — `/v1/playlists/{id}/tracks` (deprecated, `/items` nutzen), `/v1/artists` (Bulk, kein Workaround außer Production-Mode). Details + Liste in PLAN.md Phase 4b → "Spotify-API-Realität". Beim Anfassen neuer Spotify-Endpoints **erst live proben**, bevor man Schemas hardcodet — und `127.0.0.1` statt `localhost` im Browser, sonst OAuth-Cookie-Mismatch.
+## Spotify-API-Realität (2025/2026)
 
-## Liefer-Reihenfolge (wichtig)
+Diese Endpoint-Verträge sind Stand 2026 und teils anders als in älterer Doku. Wer hier später anfasst, sollte das wissen:
 
-Demo-First. Reihenfolge laut PLAN.md:
-1. Tablet-UI komplett durchklickbar mit Mock-Daten — muss sich in der Hand wie das Endprodukt anfühlen.
-2. Spotify-Integration (OAuth, Queue, Now-Playing-Polling, SSE).
-3. Claude-DJ-Brain ersetzt Mock-Kandidaten durch echte LLM-Vorschläge.
+1. **`redirect_uri` muss `127.0.0.1` sein, nicht `localhost`** (Spotify-Policy seit Nov. 2024). App im Browser über `http://127.0.0.1:3000/...` öffnen, sonst Cookie-Origin-Mismatch beim OAuth-Callback.
+2. **Playlist-Tracks heißt `/v1/playlists/{id}/items` statt `/tracks`**. Der alte Endpoint gibt für neuere Playlists `403`, für ältere noch 200 — Mischzustand. `/items` ist universell. Container-Feld pro Item ist `item` (Legacy: `track`); Track-Felder identisch. `type === 'track'` filtert Podcast-Episoden raus.
+3. **Track-Counter im `/me/playlists`-Response heißt `items.total`** (nicht `tracks.total`).
+4. **`/v1/artists` (Bulk-Lookup) gibt im Dev-Mode 403** — kein Workaround außer Production-Mode-Approval. Build fängt das ab und läuft mit leerem `spotifyGenres` weiter.
+5. **`/v1/playlists/{id}` (Single-Playlist-Metadata) funktioniert** — nur `/tracks` als Sub-Resource ist tot. Für Diagnose nutzbar.
+6. **`/me/playlists` enthält null-Items + null-Sub-Objects** (`owner`, `images`, gelegentlich `tracks`) für gelöschte/migrierte/cover-lose Playlists. Defensiv mit `?.` und Defaults zugreifen.
 
-Bau keine Phase 3/5-Features in Phase-1-Code rein. Wenn etwas einen API-Key bräuchte, ist es zu früh.
+Beim Anfassen neuer Spotify-Endpoints **erst live proben**, bevor man Schemas hardcodet.
 
 ## Harte Regeln
 
-- **Keine Texteingabe im Tablet-UI.** Keine `<input>`, keine `<textarea>`, keine Suchleiste, kein Volume-Slider, kein Login auf dem iPad. Alles wird vorher am Mac gesetzt.
+- **Keine Texteingabe im Tablet-UI.** Keine `<input>`, keine `<textarea>`, keine Suchleiste, kein Volume-Slider, kein Login auf dem iPad. Ausnahme: die Search-Box auf `/phone` ist bewusst da.
 - **iPad-Ziel-Layout: Landscape 1024×768.** Portrait-Fallback per `@media (orientation: portrait)`, aber Landscape ist primär.
 - **Touch-Targets min. 120×120 px**, Kandidaten-Karten min. 200×240 px. Kein Hover-State.
 - **`next start` während der Party, nicht `next dev`** — State liegt nur im Memory, HMR würde ihn wegwerfen.
@@ -29,9 +31,11 @@ Bau keine Phase 3/5-Features in Phase-1-Code rein. Wenn etwas einen API-Key brä
 
 ## Secrets
 
-`.env.local` ist über `.gitignore` ausgeschlossen. **Nie committen.** Erwartete Variablen (ab Phase 3/5):
+`.env.local` ist über `.gitignore` ausgeschlossen. **Nie committen.** Erwartete Variablen:
 ```
-SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI, ANTHROPIC_API_KEY
+SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI
+GOOGLE_GENERATIVE_AI_API_KEY  (oder)  ANTHROPIC_API_KEY   # Beide optional; ohne läuft Heuristik
+GETSONGBPM_API_KEY                                        # optional, nur für BPM-Lookups
 ```
 Spotify-Refresh-Token wird in `~/.aidj-app/token.json` mit `chmod 0600` gespeichert — nicht im Repo.
 
@@ -44,7 +48,7 @@ npm run build          # Produktion (vor der Party)
 npm start              # Produktions-Server, State persistiert über Lifetime des Prozesses
 npm run build-library -- <playlist-uri> [<playlist-uri> ...]
                        # Power-User-Fallback (CLI, nur public Playlists).
-                       # Primärer Weg seit Phase 4b: /admin → "Playlists aus Spotify laden".
+                       # Primärer Weg: /admin → "Playlists aus Spotify laden".
                        # Braucht SPOTIFY_CLIENT_ID/SECRET in .env.local; GETSONGBPM_API_KEY optional.
 ```
 
@@ -56,28 +60,32 @@ npm run build-library -- <playlist-uri> [<playlist-uri> ...]
 app/             Root-Page (UA-Sniff → /tablet | /phone) + Layout
   tablet/        Tablet-Frontend (das, was auf dem iPad läuft)
   phone/         Phone-Frontend (Portrait, User-Mode + DJ-Mode-Hidden-Tap-Unlock)
-  admin/         ConnectionStatus + PlaylistPicker (Build) + LibraryEditor (Tags/Energy)
+  admin/         ConnectionStatus + BrainStatus + PlaylistPicker + LibraryEditor (mit Auto-Tag)
+  history/       Post-Mortem-Page
   api/
     lan-url/     LAN-IP-Detection für QR-Code
     library/     Library load/save (PUT mit 409-Race-Schutz bei laufendem Build)
                  build/{POST,[jobId]/stream} (Two-Step-SSE-Build-Pipeline)
+                 auto-tag (POST — LLM schlägt moodTags + energyLevel batched vor)
+    search/      Phone-Suche (Library + Spotify-Web-Search gemerged, LRU 60 s)
     spotify/     OAuth (auth, callback) + Proxy (devices, select-device, queue, now-playing)
-                 + status, playlists (Phase 4b)
-    state/       stream (SSE) + button (mood/playlist/anti)
+                 + status, playlists
+    state/       stream (SSE) + button (mood/playlist/anti) + skip
     queue/       commit (Tablet-Tap → Spotify Queue + committedId, Host-Privileg)
     guest/       submit (Phone-Tap → FIFO-Gast-Queue mit 1-Slot-Quota)
 components/      NowPlayingBar, NextUpCandidates, MoodSection, PlaylistModal, AntiButtons, WifiQrCode
   phone/         PhoneTopBar, NowPlayingCard, HeartbeatBadge, GuestQueueList, …
-lib/             mock-data.ts (15 Mock-Tracks + Mood-Fragen)
+lib/             mock-data.ts (Mock-Tracks + Mood-Fragen + 9 UI-Playlist-Labels)
                  library-schema.ts (Zod, Client-Safe) + library.ts (fs-Wrapper, Server-Only)
                  library-build.ts (Shared Build-Logik + Job-Registry, Server-Only)
                  spotify.ts (Token-Storage in ~/.aidj-app/ + Wrapper + Scopes, Server-Only)
                  state.ts (Party-State-Singleton + EventEmitter + 5s-Polling, Server-Only)
-                 guest-queue.ts (In-Memory-FIFO + Mutex + Quota, Server-Only)
-                 server-state-types.ts (SSE-Wire-Format, Client-Safe)
+                 guest-queue.ts (FIFO + Mutex + Quota + 15-min-Pending-Timeout, Server-Only)
+                 server-state-types.ts (SSE-Wire-Format inkl. brain-Status, Client-Safe)
                  use-server-state.ts ('use client'-Hook auf EventSource, host|guest-Modi)
+                 dj-brain.ts (LLM-Kandidaten + Heuristik-Fallback, Server-Only)
+                 llm-provider.ts (pickModel: Gemini → Anthropic → null, Server-Only)
                  phone/ (guest-id, guest-name, dj-mode)
-                 dj-brain.ts (LLM-Kandidaten via @ai-sdk/anthropic + Heuristik-Fallback, Server-Only)
 data/            mock-covers.json, library.json (kuratierte Track-Library für DJ-Brain)
 scripts/         fetch-mock-covers.ts, build-library.ts (CLI-Fallback)
 public/          PWA-Manifest, Icons
