@@ -6,6 +6,8 @@ type Props = {
   onLove: () => void;
   onOpenPlaylists: () => void;
   activePlaylistCount: number;
+  /** Steuert das Button-Label: "Playlists" oder "Genres". */
+  filterMode: 'playlists' | 'genres';
   toast: string | null;
 };
 
@@ -18,11 +20,13 @@ export default function AntiButtons({
   onLove,
   onOpenPlaylists,
   activePlaylistCount,
+  filterMode,
   toast,
 }: Props) {
   return (
     <>
-      <div className="grid grid-cols-2 gap-3 select-none md:flex md:flex-none">
+      <section className="flex flex-none flex-col rounded-2xl border border-zinc-800 bg-zinc-900/60 p-4 select-none">
+        <div className="grid grid-cols-2 gap-3 select-none md:flex md:flex-none">
         <button
           type="button"
           onClick={onSkip}
@@ -57,14 +61,15 @@ export default function AntiButtons({
           className={`${BUTTON_BASE} relative hover:bg-purple-900 hover:shadow-[0_0_18px_rgba(168,85,247,0.45)]`}
         >
           <span aria-hidden className="text-2xl md:text-3xl">&#127911;</span>
-          Playlists
+          {filterMode === 'genres' ? 'Genres' : 'Playlists'}
           {activePlaylistCount > 0 && (
             <span className="absolute top-2 right-2 rounded-full bg-purple-500 px-2 py-0.5 text-xs font-bold text-white">
               {activePlaylistCount}
             </span>
           )}
         </button>
-      </div>
+        </div>
+      </section>
 
       {toast && (
         <div

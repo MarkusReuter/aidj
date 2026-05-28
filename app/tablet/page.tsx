@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, type CSSProperties } from 'react';
-import { MOCK_PLAYLISTS } from '@/lib/mock-data';
 import { useServerState } from '@/lib/use-server-state';
 import NowPlayingBar from '@/components/NowPlayingBar';
 import NextUpCandidates from '@/components/NextUpCandidates';
@@ -24,6 +23,10 @@ export default function TabletPage() {
     progressMs,
     moodCounts,
     activePlaylists,
+    filterMode,
+    filterOptions,
+    filterNotice,
+    bpmEnabled,
     currentQuestion,
     autoPickInSec,
     toast,
@@ -103,6 +106,8 @@ export default function TabletPage() {
           autoPickInSec={autoPickInSec}
           onTap={onCandidateTap}
           onRemoveWish={onRemoveWish}
+          showBpm={bpmEnabled}
+          filterNotice={filterNotice}
         />
 
         <div className="flex flex-none flex-col gap-2">
@@ -118,15 +123,17 @@ export default function TabletPage() {
             onLove={onLove}
             onOpenPlaylists={() => setPlaylistModalOpen(true)}
             activePlaylistCount={activePlaylists.size}
+            filterMode={filterMode}
             toast={toast}
           />
         </div>
       </main>
 
       <PlaylistModal
-        playlists={MOCK_PLAYLISTS}
+        playlists={filterOptions}
         active={activePlaylists}
         onToggle={onPlaylistToggle}
+        mode={filterMode}
         open={playlistModalOpen}
         onClose={() => setPlaylistModalOpen(false)}
       />

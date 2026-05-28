@@ -6,6 +6,7 @@ import {
   type Library,
 } from '@/lib/library';
 import { isRunning as isBuildRunning } from '@/lib/library-build';
+import { refreshLibrary } from '@/lib/state';
 
 export const dynamic = 'force-dynamic';
 
@@ -72,5 +73,9 @@ export async function PUT(request: Request): Promise<Response> {
   }
 
   await saveLibrary(parsed.data);
+  // Cache verwerfen + Kandidaten sofort neu mischen, damit Edits (Tags/Energy/
+  // Key, entfernte Tracks) ohne App-Neustart wirksam sind. Bewusst await, damit
+  // ein direkt folgendes GET/SSE schon den frischen Stand sieht.
+  await refreshLibrary();
   return Response.json({ ok: true, trackCount: parsed.data.tracks.length });
 }

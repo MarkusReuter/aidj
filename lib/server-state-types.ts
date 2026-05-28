@@ -27,6 +27,20 @@ export type SnapshotTrack = {
   guestName?: string;
 };
 
+/**
+ * Hinweis fürs Tablet, wenn der aktive Genre-/Playlist-Filter weniger Tracks
+ * traf als Kartenplätze und der Pool deshalb mit Off-Filter-Tracks aufgefüllt
+ * wurde. `null` = Filter griff sauber (genug Treffer) oder keiner aktiv.
+ */
+export type FilterNotice = {
+  /** Aktive Filter-Labels, kommagetrennt (z.B. "schlager"). */
+  label: string;
+  /** Wie viele Tracks im Pool den Filter trafen. */
+  matched: number;
+  /** Wie viele Kartenplätze gefüllt werden sollten. */
+  requested: number;
+};
+
 export type SnapshotMoodQuestion = {
   id: string;
   question: string;
@@ -75,7 +89,20 @@ export type StateSnapshot = {
   committedId: string | null;
   currentMoodQuestion: SnapshotMoodQuestion | null;
   moodCounts: Record<string, number>;
+  /** Aktiv gewählte Filter-Werte (Playlist- oder Genre-Namen, je nach `filterMode`). */
   activePlaylists: string[];
+  /** Was der Filter-Button zeigt + wonach gefiltert wird (Host-Setting). */
+  filterMode: 'playlists' | 'genres';
+  /** Verfügbare Filter-Labels im aktuellen Modus, aus der Library abgeleitet (sortiert). */
+  filterOptions: string[];
+  /**
+   * Gesetzt, wenn der aktive Filter zu wenige Tracks hatte und mit Off-Filter-
+   * Tracks aufgefüllt wurde. Tablet zeigt darüber einen Hinweis statt lautlos
+   * gemischte Karten. `null` wenn der Filter sauber griff oder keiner aktiv ist.
+   */
+  filterNotice: FilterNotice | null;
+  /** Ob BPM angezeigt + vom DJ-Brain berücksichtigt wird (Host-Setting). */
+  bpmEnabled: boolean;
   /** Aktive Gast-Wünsche (pending + playing), in Submission-Reihenfolge. */
   guestQueue: SnapshotGuestEntry[];
   /** Status des letzten DJ-Brain-Calls; null bis zum ersten Track-Wechsel. */

@@ -32,6 +32,8 @@ type AutoTagSuggestion = {
   moodTags: string[];
   genres: string[];
   energyLevel: number;
+  bpm: number | null;
+  camelotKey: string | null;
 };
 
 type ProgressEvent = {
@@ -129,6 +131,29 @@ export default function LibraryEditor({ initialLibrary }: Props) {
     [tracks, baseline],
   );
 
+  // Reiner Anzeige-Filter: schränkt nur die gerenderte Tabelle ein. `tracks`
+  // bleibt die volle Wahrheit — Save, Auto-Tag und Auto-Key arbeiten weiter auf
+  // der kompletten Library, nicht auf der gefilterten Ansicht.
+  const [query, setQuery] = useState('');
+
+  const visibleTracks = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return tracks;
+    return tracks.filter((t) => {
+      const haystack = [
+        t.title,
+        t.artist,
+        t.camelotKey ?? '',
+        ...t.spotifyGenres,
+        ...t.moodTags,
+        ...t.playlists,
+      ]
+        .join(' ')
+        .toLowerCase();
+      return haystack.includes(q);
+    });
+  }, [tracks, query]);
+
   const untaggedUris = useMemo(
     () => tracks.filter(isUntagged).map((t) => t.uri),
     [tracks],
@@ -205,18 +230,31 @@ export default function LibraryEditor({ initialLibrary }: Props) {
     setTracks((prev) => prev.filter((t) => t.uri !== uri));
   }, []);
 
-  const clearAll = useCallback(() => {
-    if (tracks.length === 0) return;
+  // Bei aktivem Filter: nur die sichtbaren (gefilterten) Tracks entfernen — so
+  // lässt sich z.B. eine ganze Quell-Playlist gezielt löschen. Ohne Filter:
+  // alles. Persistiert wird wie immer erst beim "Speichern".
+  const clearVisible = useCallback(() => {
+    const filtering = query.trim().length > 0;
+    const targets = filtering ? visibleTracks : tracks;
+    if (targets.length === 0) return;
     const ok = window.confirm(
-      `Wirklich alle ${tracks.length} Tracks aus der Library entfernen? Wird erst beim "Speichern" persistiert.`,
+      filtering
+        ? `Wirklich die ${targets.length} gefilterten Track(s) (Filter „${query.trim()}") entfernen? Wird erst beim "Speichern" persistiert.`
+        : `Wirklich alle ${tracks.length} Tracks aus der Library entfernen? Wird erst beim "Speichern" persistiert.`,
     );
     if (!ok) return;
-    setTracks([]);
-  }, [tracks.length]);
+    if (filtering) {
+      const remove = new Set(visibleTracks.map((t) => t.uri));
+      setTracks((prev) => prev.filter((t) => !remove.has(t.uri)));
+    } else {
+      setTracks([]);
+    }
+  }, [tracks, visibleTracks, query]);
 
-  const onAutoTag = useCallback(async () => {
-    if (untaggedUris.length === 0 || autoTagState.kind === 'running') return;
-    const requested = untaggedUris.length;
+  const runAutoTag = useCallback(
+    async (uris: string[]) => {
+    if (uris.length === 0 || autoTagState.kind === 'running') return;
+    const requested = uris.length;
     setAutoTagState({
       kind: 'running',
       requested,
@@ -226,9 +264,9 @@ export default function LibraryEditor({ initialLibrary }: Props) {
     });
 
     /**
-     * Live-Patch eines Batches in den Editor-State. Tracks kriegen pro Batch
-     * direkt Tags + Genres + Energy gesetzt, damit der Host beim Scrollen sieht
-     * was bisher gemacht wurde. Persistiert wird erst beim "Speichern".
+     * Live-Patch eines Batches in den Editor-State. Tracks kriegen Tags +
+     * Genres + Energy + Camelot-Key in einem Durchlauf gesetzt. Persistiert
+     * wird erst beim "Speichern".
      */
     const applyBatch = (sugs: AutoTagSuggestion[]) => {
       if (sugs.length === 0) return;
@@ -237,6 +275,10 @@ export default function LibraryEditor({ initialLibrary }: Props) {
         prev.map((t) => {
           const sug = patches.get(t.uri);
           if (!sug) return t;
+          // Upper-Case-Normalisierung wie im Library-Schema; null bleibt null.
+          const normKey = sug.camelotKey
+            ? sug.camelotKey.trim().toUpperCase()
+            : null;
           const mergedGenres = [
             ...t.spotifyGenres,
             ...sug.genres.filter((g) => !t.spotifyGenres.includes(g)),
@@ -246,6 +288,10 @@ export default function LibraryEditor({ initialLibrary }: Props) {
             moodTags: sug.moodTags,
             energyLevel: sug.energyLevel,
             spotifyGenres: mergedGenres,
+            // Echter GetSongBPM-Wert hat Vorrang — die LLM-Schätzung füllt nur
+            // Lücken (t.bpm === null), überschreibt also nie einen Messwert.
+            bpm: t.bpm ?? sug.bpm,
+            camelotKey: normKey,
           };
         }),
       );
@@ -257,7 +303,7 @@ export default function LibraryEditor({ initialLibrary }: Props) {
       const res = await fetch('/api/library/auto-tag', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ uris: untaggedUris }),
+        body: JSON.stringify({ uris }),
       });
       if (!res.ok || !res.body) {
         setAutoTagState({
@@ -320,7 +366,14 @@ export default function LibraryEditor({ initialLibrary }: Props) {
         message: err instanceof Error ? err.message : 'Unbekannter Fehler',
       });
     }
-  }, [untaggedUris, autoTagState.kind]);
+    },
+    [autoTagState.kind],
+  );
+
+  const onAutoTag = useCallback(
+    () => runAutoTag(untaggedUris),
+    [runAutoTag, untaggedUris],
+  );
 
   const onSave = useCallback(async () => {
     setSaveState({ kind: 'saving' });
@@ -366,11 +419,33 @@ export default function LibraryEditor({ initialLibrary }: Props) {
         <div>
           <h1 className="text-2xl font-bold">Library Editor</h1>
           <p className="mt-1 text-sm text-zinc-400">
-            {tracks.length} Tracks
+            {query.trim()
+              ? `${visibleTracks.length} von ${tracks.length} Tracks`
+              : `${tracks.length} Tracks`}
             {initialLibrary.builtAt
               ? ` · gebaut ${new Date(initialLibrary.builtAt).toLocaleString('de-DE')}`
               : ' · noch nicht via Build-Script gebaut (Demo-Library aus Mock-Daten)'}
           </p>
+          <div className="mt-2 flex items-center gap-2">
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Filter: Titel, Artist, Genre, Mood, Key, Playlist…"
+              aria-label="Tracks filtern"
+              className="w-80 rounded-md border border-zinc-700 bg-zinc-900 px-3 py-1.5 text-sm text-zinc-100 placeholder:text-zinc-500 focus:border-purple-600 focus:outline-none"
+            />
+            {query.trim() && (
+              <button
+                type="button"
+                onClick={() => setQuery('')}
+                className="rounded-md border border-zinc-700 px-2 py-1.5 text-xs text-zinc-400 hover:bg-zinc-800"
+                title="Filter zurücksetzen"
+              >
+                ×
+              </button>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-3">
           <AutoTagStatusBadge state={autoTagState} />
@@ -402,12 +477,16 @@ export default function LibraryEditor({ initialLibrary }: Props) {
           </button>
           <button
             type="button"
-            onClick={clearAll}
-            disabled={tracks.length === 0 || saveState.kind === 'saving'}
+            onClick={clearVisible}
+            disabled={visibleTracks.length === 0 || saveState.kind === 'saving'}
             className="rounded-md border border-red-900/60 bg-red-950/40 px-3 py-2 text-sm font-medium text-red-200 hover:bg-red-900/40 disabled:cursor-not-allowed disabled:border-zinc-800 disabled:bg-zinc-900 disabled:text-zinc-600"
-            title="Alle Tracks aus der Library entfernen"
+            title={
+              query.trim()
+                ? `${visibleTracks.length} gefilterte Track(s) entfernen`
+                : 'Alle Tracks aus der Library entfernen'
+            }
           >
-            Alle entfernen
+            {query.trim() ? `${visibleTracks.length} entfernen` : 'Alle entfernen'}
           </button>
           <button
             type="button"
@@ -445,6 +524,7 @@ export default function LibraryEditor({ initialLibrary }: Props) {
               <th className="px-3 py-2">Title / Artist</th>
               <th className="px-3 py-2">Dauer</th>
               <th className="px-3 py-2">BPM</th>
+              <th className="px-3 py-2">Key</th>
               <th className="px-3 py-2">Genres</th>
               <th className="px-3 py-2">Mood-Tags</th>
               <th className="px-3 py-2">Energy</th>
@@ -454,7 +534,7 @@ export default function LibraryEditor({ initialLibrary }: Props) {
             </tr>
           </thead>
           <tbody>
-            {tracks.map((track) => (
+            {visibleTracks.map((track) => (
               <TrackRow
                 key={track.uri}
                 track={track}
@@ -466,14 +546,15 @@ export default function LibraryEditor({ initialLibrary }: Props) {
                 onRemove={removeTrack}
               />
             ))}
-            {tracks.length === 0 && (
+            {visibleTracks.length === 0 && (
               <tr>
                 <td
-                  colSpan={8}
+                  colSpan={9}
                   className="px-3 py-6 text-center text-xs text-zinc-500"
                 >
-                  Library ist leer. Über "Library bauen" oben neue Tracks
-                  laden oder die Datei direkt befüllen.
+                  {tracks.length === 0
+                    ? 'Library ist leer. Über "Library bauen" oben neue Tracks laden oder die Datei direkt befüllen.'
+                    : `Kein Track passt zum Filter „${query.trim()}".`}
                 </td>
               </tr>
             )}
@@ -605,15 +686,31 @@ function TrackRow({
       <td className="px-3 py-3">
         <div className="font-medium text-zinc-100">{track.title}</div>
         <div className="text-xs text-zinc-400">{track.artist}</div>
-        <div className="mt-1 font-mono text-[10px] text-zinc-600">
-          {track.uri}
-        </div>
+        {track.playlists.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-1">
+            {track.playlists.map((p) => (
+              <span
+                key={p}
+                className="rounded bg-zinc-800/80 px-1.5 py-0.5 text-[10px] text-zinc-400"
+                title="Quell-Playlist"
+              >
+                ♪ {p}
+              </span>
+            ))}
+          </div>
+        )}
       </td>
       <td className="px-3 py-3 text-zinc-300">
         {formatDuration(track.durationMs)}
       </td>
       <td className="px-3 py-3 text-zinc-300">
         {track.bpm ?? <span className="text-zinc-600">—</span>}
+      </td>
+      <td className="px-3 py-3">
+        <KeyControl
+          value={track.camelotKey}
+          onChange={(v) => onUpdate(track.uri, { camelotKey: v })}
+        />
       </td>
       <td className="px-3 py-3">
         <FreeFormTagCell
@@ -752,5 +849,64 @@ function EnergyControl({
         {value === null ? 'setzen' : 'leeren'}
       </button>
     </div>
+  );
+}
+
+const CAMELOT_RE = /^(1[0-2]|[1-9])[AB]$/;
+
+/**
+ * Manuelle Camelot-Key-Eingabe/-Korrektur. Normalisiert auf Upper-Case (wie das
+ * Library-Schema) und committet nur, wenn die Eingabe valides Camelot ist; leere
+ * Eingabe setzt den Key auf null. Ungültiges wird beim Blur auf den letzten
+ * gültigen Wert zurückgesetzt, damit nie Müll im State landet.
+ */
+function KeyControl({
+  value,
+  onChange,
+}: {
+  value: string | null;
+  onChange: (v: string | null) => void;
+}) {
+  const [draft, setDraft] = useState(value ?? '');
+  // Sync, wenn der Wert von außen kommt (z.B. Auto-Tag-Batch).
+  const [lastValue, setLastValue] = useState(value);
+  if (value !== lastValue) {
+    setLastValue(value);
+    setDraft(value ?? '');
+  }
+
+  const commit = () => {
+    const v = draft.trim().toUpperCase();
+    if (v === '') {
+      onChange(null);
+      setDraft('');
+      return;
+    }
+    if (CAMELOT_RE.test(v)) {
+      onChange(v);
+      setDraft(v);
+    } else {
+      // Ungültig → verwerfen, auf letzten gültigen Stand zurück.
+      setDraft(value ?? '');
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          (e.target as HTMLInputElement).blur();
+        }
+      }}
+      onBlur={commit}
+      placeholder="—"
+      aria-label="Camelot-Key (z.B. 8A)"
+      title="Camelot-Key fürs Harmonic Mixing (z.B. 8A, 11B). Leer = unbekannt."
+      className="w-14 rounded bg-zinc-800/60 px-1.5 py-0.5 text-center font-mono text-xs text-zinc-200 placeholder:text-zinc-600 focus:bg-zinc-800 focus:outline-none"
+    />
   );
 }

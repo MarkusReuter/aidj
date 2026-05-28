@@ -8,13 +8,24 @@ type Props = {
   committedId: string | null;
   autoPickInSec: number;
   onTap: (id: string) => void;
+  /** BPM-Badge anzeigen (Host-Setting). Default true. */
+  showBpm?: boolean;
 };
+
+/** Sekunden → "m:ss" (z. B. 103 → "1:43"). */
+function fmtCountdown(totalSec: number): string {
+  const safe = Math.max(0, Math.floor(totalSec));
+  const m = Math.floor(safe / 60);
+  const s = safe % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 export default function PhoneCandidates({
   candidates,
   committedId,
   autoPickInSec,
   onTap,
+  showBpm = true,
 }: Props) {
   return (
     <section className="flex flex-col gap-2 rounded-2xl border border-zinc-800 bg-zinc-900/60 p-3 select-none">
@@ -63,9 +74,11 @@ export default function PhoneCandidates({
                   </p>
                   <p className="truncate text-sm text-zinc-400">{track.artist}</p>
                   <div className="mt-1 flex items-center gap-2">
-                    <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-mono font-semibold text-purple-300">
-                      ♪ {track.bpm}
-                    </span>
+                    {showBpm && (
+                      <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] font-mono font-semibold text-purple-300">
+                        ♪ {track.bpm}
+                      </span>
+                    )}
                     <span className="rounded-full bg-zinc-800 px-2 py-0.5 text-[10px] uppercase tracking-wider text-zinc-400">
                       {track.genre}
                     </span>
@@ -78,8 +91,7 @@ export default function PhoneCandidates({
       </ul>
 
       <p className="text-center text-xs text-zinc-500">
-        Auto-Pick in 0:{autoPickInSec.toString().padStart(2, '0')}, falls niemand
-        tippt
+        Auto-Pick in {fmtCountdown(autoPickInSec)}, falls niemand tippt
       </p>
     </section>
   );

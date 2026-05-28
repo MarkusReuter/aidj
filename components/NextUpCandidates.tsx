@@ -3,6 +3,7 @@
 import Image from 'next/image';
 import { useCallback, useRef, useState } from 'react';
 import type { Track } from '@/lib/mock-data';
+import type { FilterNotice } from '@/lib/server-state-types';
 
 type Props = {
   candidates: Track[];
@@ -11,7 +12,19 @@ type Props = {
   onTap: (id: string) => void;
   /** Plan2: Long-Press auf Gast-Wunsch-Karte → Confirm-Modal → entfernen. */
   onRemoveWish?: (submissionId: string) => Promise<{ ok: boolean }>;
+  /** BPM-Badge anzeigen (Host-Setting). Default true. */
+  showBpm?: boolean;
+  /** Gesetzt, wenn der aktive Filter zu wenige Tracks hatte (aufgefüllt). */
+  filterNotice?: FilterNotice | null;
 };
+
+/** Sekunden → "m:ss" (z. B. 103 → "1:43"). */
+function fmtCountdown(totalSec: number): string {
+  const safe = Math.max(0, Math.floor(totalSec));
+  const m = Math.floor(safe / 60);
+  const s = safe % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 /** Wie lange muss der Finger auf einer Wunsch-Karte liegen für die Lösch-Geste? */
 const LONG_PRESS_MS = 700;
@@ -22,6 +35,8 @@ export default function NextUpCandidates({
   autoPickInSec,
   onTap,
   onRemoveWish,
+  showBpm = true,
+  filterNotice = null,
 }: Props) {
   const [pending, setPending] = useState<{
     submissionId: string;
@@ -86,9 +101,17 @@ export default function NextUpCandidates({
           </h3>
           <p className="text-xs text-zinc-500">
             <span aria-hidden>&#9201;</span>{' '}
-            Auto-Pick in 0:{autoPickInSec.toString().padStart(2, '0')}, falls niemand tippt
+            Auto-Pick in {fmtCountdown(autoPickInSec)}, falls niemand tippt
           </p>
         </div>
+
+        {filterNotice && (
+          <p className="rounded-lg border border-amber-700/50 bg-amber-950/40 px-3 py-1.5 text-xs text-amber-300">
+            {filterNotice.matched === 0
+              ? `Kein Track mit Filter „${filterNotice.label}" in der Library — zeige gemischte Vorschläge.`
+              : `Nur ${filterNotice.matched} Track${filterNotice.matched === 1 ? '' : 's'} mit Filter „${filterNotice.label}" — restliche Karten vom DJ ergänzt.`}
+          </p>
+        )}
 
         <div className="grid min-h-0 flex-1 grid-cols-4 gap-3 portrait:grid-cols-2">
           {candidates.map((track) => {
@@ -127,10 +150,12 @@ export default function NextUpCandidates({
                       GEPICKT
                     </div>
                   )}
-                  <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-xs font-mono font-semibold text-purple-300 backdrop-blur-sm animate-pulse">
-                    <span aria-hidden>&#9834;</span>
-                    {track.bpm}
-                  </span>
+                  {showBpm && (
+                    <span className="absolute top-2 right-2 inline-flex items-center gap-1 rounded-full bg-black/70 px-2 py-0.5 text-xs font-mono font-semibold text-purple-300 backdrop-blur-sm animate-pulse">
+                      <span aria-hidden>&#9834;</span>
+                      {track.bpm}
+                    </span>
+                  )}
                 </div>
 
                 <div className="flex min-w-0 flex-col gap-0.5">

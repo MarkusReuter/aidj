@@ -1,6 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Die Next.js-Dev-Tools-Anzeige unten links nur einblenden, wenn über
+  // VS Code (F5) gestartet wurde. Die Launch-Config setzt AIDJ_DEVTOOLS=1;
+  // ein normales `npm run dev` aus dem Terminal lässt das Flag leer und
+  // bekommt den Indicator ausgeblendet.
+  ...(process.env.AIDJ_DEVTOOLS === '1' ? {} : { devIndicators: false as const }),
   images: {
     remotePatterns: [
       { protocol: 'https', hostname: 'i.scdn.co' },

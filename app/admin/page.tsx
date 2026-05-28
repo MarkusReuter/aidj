@@ -7,7 +7,9 @@ import {
 } from '@/lib/spotify';
 import BrainStatus from './BrainStatus';
 import ConnectionStatus from './ConnectionStatus';
+import BpmSetting from './BpmSetting';
 import CooldownSetting from './CooldownSetting';
+import FilterModeSetting from './FilterModeSetting';
 import LibraryEditor from './LibraryEditor';
 import PlaylistPicker from './PlaylistPicker';
 
@@ -60,6 +62,8 @@ export default async function AdminPage() {
       <ConnectionStatus status={spotifyStatus} />
       <BrainStatus />
       <CooldownSetting />
+      <FilterModeSetting />
+      <BpmSetting />
       {spotifyStatus.connected && spotifyStatus.hasPlaylistScope && (
         <PlaylistPicker />
       )}

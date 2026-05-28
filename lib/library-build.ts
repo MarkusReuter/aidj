@@ -23,6 +23,7 @@ import {
   type Library,
   type LibraryTrack,
 } from './library';
+import { refreshLibrary } from './state';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Spotify-Fetch-Interface (injiziert).
@@ -128,6 +129,26 @@ export async function fetchPlaylistTracks(
     url = page.next ? page.next.replace('https://api.spotify.com', '') : null;
   }
   return out;
+}
+
+/**
+ * Holt den Anzeige-Namen einer Playlist. `/v1/playlists/{id}` (Single-Metadata)
+ * funktioniert auch dann, wenn `/items` 403't (siehe CLAUDE.md Spotify-Notiz #5).
+ * Throw-safe — bei jedem Fehler `null`, der Caller fällt dann auf die ID zurück.
+ */
+export async function fetchPlaylistName(
+  playlistId: string,
+  fetchSpotify: SpotifyFetch,
+): Promise<string | null> {
+  try {
+    const res = await fetchSpotify(`/v1/playlists/${playlistId}?fields=name`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { name?: string | null };
+    const name = data.name?.trim();
+    return name && name.length > 0 ? name : null;
+  } catch {
+    return null;
+  }
 }
 
 export class ArtistsLookupForbiddenError extends Error {
@@ -325,10 +346,24 @@ export async function buildLibraryFromPlaylists(
   const newRawTracks: RawTrack[] = [];
   let alreadyPresentCount = 0;
   const skippedPlaylists: string[] = [];
+  // uri → Set der Quell-Playlist-Namen. Wird VOR dem Dedup gefüllt, damit ein
+  // Track, der in mehreren importierten Playlists vorkommt, alle Namen sammelt
+  // (auch wenn er nur einmal gefetcht/angehängt wird).
+  const trackPlaylists = new Map<string, Set<string>>();
   for (const pid of playlistIds) {
     try {
+      // Playlist-Name als Label; bei 403/Fehler fällt fetchPlaylistName auf
+      // null zurück → wir nehmen die ID als (hässlicheren) Fallback-Namen.
+      const playlistName = (await fetchPlaylistName(pid, fetchSpotify)) ?? pid;
       const items = await fetchPlaylistTracks(pid, fetchSpotify);
       for (const t of items) {
+        let names = trackPlaylists.get(t.uri);
+        if (!names) {
+          names = new Set<string>();
+          trackPlaylists.set(t.uri, names);
+        }
+        names.add(playlistName);
+
         if (seenUris.has(t.uri)) continue;
         seenUris.add(t.uri);
         if (existingByUri.has(t.uri)) {
@@ -424,6 +459,8 @@ export async function buildLibraryFromPlaylists(
         bpm,
         moodTags: [],
         energyLevel: null,
+        camelotKey: null,
+        playlists: [...(trackPlaylists.get(t.uri) ?? [])],
       };
 
       processed++;
@@ -439,14 +476,31 @@ export async function buildLibraryFromPlaylists(
     },
   );
 
+  // Bestehende Tracks, die in einer jetzt importierten Playlist (wieder)
+  // vorkamen, kriegen den Playlist-Namen nachgetragen — so wird die
+  // Playlist-Zugehörigkeit auch für Tracks komplett, die schon vor diesem
+  // Build in der Library waren (z. B. über eine andere Playlist reingekommen).
+  let existingChanged = false;
+  const mergedExisting: LibraryTrack[] = existing.tracks.map((t) => {
+    const fromBuild = trackPlaylists.get(t.uri);
+    if (!fromBuild || fromBuild.size === 0) return t;
+    const merged = Array.from(new Set([...t.playlists, ...fromBuild]));
+    if (merged.length === t.playlists.length) return t;
+    existingChanged = true;
+    return { ...t, playlists: merged };
+  });
+
   // Bestand bleibt vorne in seiner Reihenfolge, neue Tracks hängen hinten dran
   // (Input-Reihenfolge der Playlists). builtAt nur dann aktualisieren, wenn
-  // tatsächlich was hinzukam — sonst bleibt der bisherige Timestamp stehen,
-  // damit "Build mit 0 neuen Tracks" nicht aussieht wie eine frische Library.
-  const tracks: LibraryTrack[] = [...existing.tracks, ...newTracks];
+  // sich tatsächlich was geändert hat (neue Tracks ODER Playlist-Merge in den
+  // Bestand) — sonst bleibt der bisherige Timestamp stehen, damit "Build mit 0
+  // Änderungen" nicht aussieht wie eine frische Library.
+  const tracks: LibraryTrack[] = [...mergedExisting, ...newTracks];
   const library: Library = {
     builtAt:
-      newTracks.length > 0 ? new Date().toISOString() : existing.builtAt,
+      newTracks.length > 0 || existingChanged
+        ? new Date().toISOString()
+        : existing.builtAt,
     tracks,
   };
   emit({
@@ -556,6 +610,9 @@ async function runJob(
       },
     });
     await saveLibrary(library);
+    // Cache verwerfen + Kandidaten sofort neu mischen, damit die frisch
+    // importierten Tracks ohne App-Neustart im DJ-Brain-Pool landen.
+    await refreshLibrary();
     job.library = library;
     job.status = 'done';
     job.finishedAt = Date.now();

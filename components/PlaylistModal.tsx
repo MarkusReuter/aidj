@@ -6,6 +6,8 @@ type Props = {
   playlists: string[];
   active: Set<string>;
   onToggle: (p: string) => void;
+  /** Steuert Titel + Texte: Playlist- oder Genre-Auswahl. */
+  mode: 'playlists' | 'genres';
   open: boolean;
   onClose: () => void;
 };
@@ -14,9 +16,11 @@ export default function PlaylistModal({
   playlists,
   active,
   onToggle,
+  mode,
   open,
   onClose,
 }: Props) {
+  const noun = mode === 'genres' ? 'Genres' : 'Playlists';
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -32,7 +36,7 @@ export default function PlaylistModal({
     <div
       role="dialog"
       aria-modal="true"
-      aria-label="Playlists wählen"
+      aria-label={`${noun} wählen`}
       onClick={onClose}
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 p-6 backdrop-blur-sm animate-[fade-in_0.15s_ease-out] select-none"
     >
@@ -41,11 +45,19 @@ export default function PlaylistModal({
         className="flex max-h-full w-full max-w-5xl flex-col gap-4 rounded-3xl border border-zinc-800 bg-zinc-950 p-6 shadow-2xl"
       >
         <div className="flex items-baseline justify-between">
-          <h2 className="text-2xl font-bold text-zinc-50">Playlists wählen</h2>
+          <h2 className="text-2xl font-bold text-zinc-50">{noun} wählen</h2>
           <span className="text-sm text-zinc-500">
             {active.size > 0 ? `${active.size} aktiv` : 'keine aktiv = alle erlaubt'}
           </span>
         </div>
+
+        {playlists.length === 0 && (
+          <p className="py-8 text-center text-sm text-zinc-500">
+            {mode === 'genres'
+              ? 'Keine Genres in der Library — Tracks importieren oder taggen.'
+              : 'Keine Playlists in der Library — über /admin Playlists importieren.'}
+          </p>
+        )}
 
         <div className="grid grid-cols-3 gap-3">
           {playlists.map((p) => {

@@ -6,7 +6,7 @@ Touch-only Tablet-App für Partys: ein LLM (Gemini oder Claude — siehe DJ-Brai
 
 ## Heutiger Stand
 
-End-to-end spielbar. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync; Singleton lebt auf `globalThis` damit Dev-HMR den State nicht verliert). Kandidaten kommen vom DJ-Brain (`lib/dj-brain.ts`) — Provider-Auswahl via `lib/llm-provider.ts` (Gemini 2.5 Flash bevorzugt, Claude Sonnet 4.6 als Fallback), beide via Vercel AI SDK + `generateObject`. Heuristik-Fallback wenn kein LLM-Key gesetzt ist (BPM-Match ±10, Tag-Overlap-Penalties aus 👎/❤️, History-Exclusion). Cooldown-Filter sperrt Tracks, die innerhalb `settings.cooldownMinutes` (default 2 h) liefen — Gast-Wünsche umgehen ihn. Tablet-Tap committet direkt in die Spotify-Queue (`/api/queue/commit`, Host-Privileg); Phone-Tap geht durch die Gast-Queue (`/api/guest/submit`) mit FIFO + 1-Slot-Quota + Idempotenz + Max-10-pending + 15-min-Pending-Timeout (lazy-sweep). Track-Lifecycle (pending → playing → done) wird automatisch beim Spotify-Track-Wechsel gesetzt. Lock-Window pusht ~10 s vor Track-Ende den Auto-Pick (committed-Wahl oder Top-Kandidat) in die Spotify-Queue. Skip ist echt (`/api/state/skip` → `spotify.skipToNext()`). 👎/❤️ + Mood-Shift triggern Brain-Re-Rank. `/admin` zeigt Spotify-ConnectionStatus + Brain-Provider-Live-Badge + Cooldown-Slider + Playlist-Picker (additiver Library-Build via SSE-Stream) + LibraryEditor mit Auto-Tag-Button (LLM vergibt free-form `moodTags` + `genres` + `energyLevel`, streamt Progress pro Batch, Concurrency 10, vocabulary-hint sorgt für Tag-Konsistenz; User reviewt + speichert). `/history` ist die Post-Mortem-Page. Phone-Suche trifft `/api/search` (Library + Spotify Web-Search gemerged, LRU-Cache 60 s); Phone darf einen zweiten Track stagen während der eigene Slot noch belegt ist (Submit-CTA gated, Suche bleibt aktiv).
+End-to-end spielbar. Tablet/Phone hängen an `lib/state.ts` (5-s-Spotify-Polling, EventEmitter-Pub-Sub, Multi-Client-Sync; Singleton lebt auf `globalThis` damit Dev-HMR den State nicht verliert). Kandidaten kommen vom DJ-Brain (`lib/dj-brain.ts`) — Provider-Auswahl via `lib/llm-provider.ts` (Gemini 2.5 Flash bevorzugt, Claude Sonnet 4.6 als Fallback), beide via Vercel AI SDK + `generateObject`. Heuristik-Fallback wenn kein LLM-Key gesetzt ist (BPM-Match ±10, Energy-/Mood-/Camelot-Key-Kontinuität zum laufenden Track, Tag-Overlap-Penalties aus 👎/❤️, History-Exclusion). DJ-mäßiges Mixing: beide Pfade planen den Übergang relativ zum laufenden Track — Kandidat #1 (der Auto-Pick) schließt per BPM-/Energy-Stufe + harmonisch kompatibler Camelot-Tonart sauber an, #2-#4 bleiben bewusst divers für echte Crowd-Auswahl. (Kein Audio-Crossfade — Spotify Connect kann nur einen Stream, also reine Auswahl-Glättung, kein Ineinander-Blenden.) Cooldown-Filter sperrt Tracks, die innerhalb `settings.cooldownMinutes` (default 2 h) liefen — Gast-Wünsche umgehen ihn. Tablet-Tap committet direkt in die Spotify-Queue (`/api/queue/commit`, Host-Privileg); Phone-Tap geht durch die Gast-Queue (`/api/guest/submit`) mit FIFO + 1-Slot-Quota + Idempotenz + Max-10-pending + 15-min-Pending-Timeout (lazy-sweep). Track-Lifecycle (pending → playing → done) wird automatisch beim Spotify-Track-Wechsel gesetzt. Lock-Window pusht ~10 s vor Track-Ende den Auto-Pick (committed-Wahl oder Top-Kandidat) in die Spotify-Queue. Skip ist echt (`/api/state/skip` → `spotify.skipToNext()`). 👎/❤️ + Mood-Shift triggern Brain-Re-Rank. `/admin` zeigt Spotify-ConnectionStatus + Brain-Provider-Live-Badge + Cooldown-Slider + Playlist-Picker (additiver Library-Build via SSE-Stream) + LibraryEditor mit Auto-Tag-Button (LLM vergibt `moodTags` + broad-umbrella `genres` + `energyLevel` und schätzt zusätzlich `bpm` (nur Lückenfüller — echter GetSongBPM-Wert hat Vorrang) + `camelotKey` in Camelot-Notation fürs Harmonic Mixing; streamt Progress pro Batch, Concurrency 10, vocabulary-hint sorgt für Tag-Konsistenz; User reviewt + korrigiert (Key-Spalte editierbar) + speichert). `/history` ist die Post-Mortem-Page. Phone-Suche trifft `/api/search` (Library + Spotify Web-Search gemerged, LRU-Cache 60 s); Phone darf einen zweiten Track stagen während der eigene Slot noch belegt ist (Submit-CTA gated, Suche bleibt aktiv).
 
 ## Spotify-API-Realität (2025/2026)
 
@@ -27,7 +27,9 @@ Beim Anfassen neuer Spotify-Endpoints **erst live proben**, bevor man Schemas ha
 - **iPad-Ziel-Layout: Landscape 1024×768.** Portrait-Fallback per `@media (orientation: portrait)`, aber Landscape ist primär.
 - **Touch-Targets min. 120×120 px**, Kandidaten-Karten min. 200×240 px. Kein Hover-State.
 - **`next start` während der Party, nicht `next dev`** — State liegt nur im Memory. Der `globalThis`-Stash in `lib/state.ts` hilft im Dev-Modus den HMR zu überleben, aber Production-Mode ist robuster.
-- **Mood-Tags + Genres sind free-form Strings** — kein hardcoded Enum, das LLM beim Auto-Tagging vergibt sie selbst. Konsistenz kommt aus dem Vocabulary-Hint im Prompt (top-30 bisheriger Tags wird dem Modell mitgegeben). Normalisierung: `trim().toLowerCase()` im Schema, sonst kein Lock-In.
+- **Mood-Tags sind free-form Strings** — kein hardcoded Enum, das LLM beim Auto-Tagging vergibt sie selbst. Konsistenz kommt aus dem Vocabulary-Hint im Prompt (top-30 bisheriger Tags wird dem Modell mitgegeben). Normalisierung: `trim().toLowerCase()` im Schema, sonst kein Lock-In.
+- **Genres sind technisch free-form (Schema), praktisch aber auf ein broad-umbrella-Set gesteuert.** Der Auto-Tag-Prompt gibt eine kanonische Liste grober Genres vor (pop, hip-hop, house, techno, electronic, edm, rock, indie, r&b, soul, funk, disco, reggae, dancehall, latin, afrobeats, jazz, classical, metal, punk, country, schlager, ambient) und weist das LLM an, hyper-spezifische Sub-Genres **nach oben aufs Dach zu kollabieren** (z. B. trap/drill/boom-bap → hip-hop, deep-house/tech-house → house), 1-2 pro Track. Das Schema erzwingt das nicht (kein Enum-Lock-In), nur der Prompt — wer das Vokabular ändern will, fasst den Prompt in `app/api/library/auto-tag/route.ts` an. Normalisierung wie Mood-Tags: `trim().toLowerCase()`.
+- **Camelot-Keys sind validierte Strings**, kein free-form: Format `<1-12><A|B>` (z. B. `8A`), upper-cased im Schema. Vom Auto-Tag-LLM geschätzt, im Editor manuell korrigierbar.
 - **Spotify-Account muss Premium sein** — Queue-Control ist Premium-only. Mit Free läuft die App nicht.
 
 ## Secrets
@@ -67,8 +69,9 @@ app/             Root-Page (UA-Sniff → /tablet | /phone) + Layout
     lan-url/     LAN-IP-Detection für QR-Code
     library/     Library load/save (PUT mit 409-Race-Schutz bei laufendem Build)
                  build/{POST,[jobId]/stream} (Two-Step-SSE-Build-Pipeline)
-                 auto-tag (POST liefert SSE-Stream: moodTags + genres + energyLevel,
-                           Concurrency 10, 429-Retry, sized für ~2000 Tracks)
+                 auto-tag (POST liefert SSE-Stream: moodTags + genres + energyLevel
+                           + geschätzte bpm + camelotKey, Concurrency 10, 429-Retry,
+                           sized für ~2000 Tracks)
     search/      Phone-Suche (Library + Spotify-Web-Search gemerged, LRU 60 s)
     settings/    GET/PUT Host-Settings (Cooldown-Minuten), persistiert via lib/settings.ts
     spotify/     OAuth (auth, callback) + Proxy (devices, select-device, queue, now-playing)
@@ -79,7 +82,8 @@ app/             Root-Page (UA-Sniff → /tablet | /phone) + Layout
 components/      NowPlayingBar, NextUpCandidates, MoodSection, PlaylistModal, AntiButtons, WifiQrCode
   phone/         PhoneTopBar, NowPlayingCard, HeartbeatBadge, GuestQueueList, …
 lib/             mock-data.ts (Mock-Tracks + Mood-Fragen + 9 UI-Playlist-Labels)
-                 library-schema.ts (Zod, Client-Safe; moodTags/genres = free-form strings)
+                 library-schema.ts (Zod, Client-Safe; moodTags/genres = free-form strings;
+                                    camelotKey = Camelot-Tonart "8A"/"11B" fürs Harmonic Mixing, nullable)
                  library.ts (fs-Wrapper, Server-Only)
                  library-build.ts (Shared Build-Logik + Job-Registry, Server-Only)
                  settings.ts (Host-Settings in ~/.aidj-app/settings.json, Server-Only)

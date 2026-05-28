@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MoodOption, MoodQuestion, Track } from '@/lib/mock-data';
 import type {
+  FilterNotice,
   SnapshotGuestEntry,
   StateSnapshot,
 } from '@/lib/server-state-types';
@@ -48,6 +49,14 @@ export type UseServerStateResult = {
   progressMs: number;
   moodCounts: Record<string, number>;
   activePlaylists: Set<string>;
+  /** Filter-Modus (Host-Setting): zeigt der Button Playlists oder Genres. */
+  filterMode: 'playlists' | 'genres';
+  /** Verfügbare Filter-Labels im aktuellen Modus, aus der Library abgeleitet. */
+  filterOptions: string[];
+  /** Gesetzt, wenn der aktive Filter zu wenige Tracks hatte (aufgefüllt). */
+  filterNotice: FilterNotice | null;
+  /** Ob BPM angezeigt + berücksichtigt wird (Host-Setting). */
+  bpmEnabled: boolean;
   currentQuestion: MoodQuestion | undefined;
   autoPickInSec: number;
   toast: string | null;
@@ -76,6 +85,10 @@ function snapshotToHookResult(snapshot: StateSnapshot | null): {
   currentQuestion: MoodQuestion | undefined;
   moodCounts: Record<string, number>;
   activePlaylists: Set<string>;
+  filterMode: 'playlists' | 'genres';
+  filterOptions: string[];
+  filterNotice: FilterNotice | null;
+  bpmEnabled: boolean;
   committedId: string | null;
   guestQueue: SnapshotGuestEntry[];
 } {
@@ -86,6 +99,10 @@ function snapshotToHookResult(snapshot: StateSnapshot | null): {
       currentQuestion: undefined,
       moodCounts: {},
       activePlaylists: new Set(),
+      filterMode: 'playlists',
+      filterOptions: [],
+      filterNotice: null,
+      bpmEnabled: true,
       committedId: null,
       guestQueue: [],
     };
@@ -104,6 +121,10 @@ function snapshotToHookResult(snapshot: StateSnapshot | null): {
       : undefined,
     moodCounts: snapshot.moodCounts,
     activePlaylists: new Set(snapshot.activePlaylists),
+    filterMode: snapshot.filterMode,
+    filterOptions: snapshot.filterOptions,
+    filterNotice: snapshot.filterNotice,
+    bpmEnabled: snapshot.bpmEnabled,
     committedId: snapshot.committedId,
     guestQueue: snapshot.guestQueue,
   };

@@ -74,8 +74,19 @@ const SuggestionSchema = z.object({
     z.object({
       uri: z.string(),
       moodTags: z.array(z.string().min(1).max(40)).min(1).max(4),
-      genres: z.array(z.string().min(1).max(40)).min(1).max(3),
+      genres: z.array(z.string().min(1).max(40)).min(1).max(2),
       energyLevel: z.number().int().min(1).max(10),
+      // BPM-Best-Effort-Schätzung (40–220, passend zum Library-Schema); null
+      // wenn das Modell sich nicht festlegen kann. Echte GetSongBPM-Werte haben
+      // clientseitig Vorrang — der Schätzwert füllt nur Lücken.
+      bpm: z.number().int().min(40).max(220).nullable(),
+      // Camelot-Tonart als Best-Effort-Schätzung; null wenn das Modell sich
+      // nicht festlegen kann. Regex erlaubt Klein-/Großschreibung — Normalisierung
+      // (Upper-Case) macht das Library-Schema beim Speichern.
+      camelotKey: z
+        .string()
+        .regex(/^(1[0-2]|[1-9])[ABab]$/)
+        .nullable(),
     }),
   ),
 });
@@ -83,12 +94,18 @@ const SuggestionSchema = z.object({
 const SYSTEM_PROMPT = `You are a DJ library taxonomist. For each track, propose:
 
 1. moodTags: 1-4 short lower-case tags describing vibe/use-case (e.g. "warm-up", "peak", "afterhours", "feelgood", "melancholic", "banger", "dancefloor", "chill" — or invent new ones if they fit better). Each tag ≤ 40 chars, no whitespace at the edges. Be precise — pick only tags that genuinely apply.
-2. genres: 1-3 short lower-case genre labels (e.g. "house", "techno", "indie-pop", "hip-hop", "soul", "ambient"). Use sub-genres if obvious ("deep-house" over "house"). Each tag ≤ 40 chars.
+2. genres: 1-2 BROAD umbrella genres, kept deliberately coarse so a partygoer recognises them at a glance. **Pick from this canonical set, and only step outside it if truly nothing fits:** "pop", "hip-hop", "house", "techno", "electronic", "edm", "rock", "indie", "r&b", "soul", "funk", "disco", "reggae", "dancehall", "latin", "afrobeats", "jazz", "classical", "metal", "punk", "country", "schlager", "ambient".
+   - **Collapse, never specialise.** Map hyper-specific sub-genres UP to their umbrella: "battle rap" / "abstract hip hop" / "australian hip hop" / "trap" / "drill" / "boom bap" → "hip-hop"; "deep house" / "tech house" / "future house" / "bass house" → "house"; "melodic techno" / "hard techno" → "techno"; "synthpop" / "electropop" / "dance pop" → "pop".
+   - The input "genres" field comes from Spotify and is often absurdly granular — treat it only as a hint and map it up to the umbrella. Prefer ONE genre; add a second only when a track genuinely straddles two umbrellas (e.g. a house/pop crossover). Each label ≤ 40 chars.
 3. energyLevel: 1-10 integer. 1 = ambient/chill background, 5 = solid groove, 8 = peak-time floor-filler, 10 = absolute banger.
+4. bpm: the track's tempo in beats per minute (integer, 40-220), estimated from your knowledge of the song. Best-effort: return null if you genuinely don't know the track. Watch out for half-/double-time confusion — report the tempo a DJ would beatmatch on (e.g. most house/techno is 120-130, hip-hop 80-100, drum'n'bass ~174). If the input already lists a bpm, just echo that value. Do NOT invent a confident number for an unknown track.
+5. camelotKey: the track's musical key in Camelot notation for harmonic mixing — a number 1-12 plus "A" (minor) or "B" (major), e.g. "8A", "11B". Estimate it from your knowledge of the song. This is a best-effort guess: if you genuinely don't know the track and can't infer the key, return null instead of guessing randomly. Do NOT fabricate a confident-looking key for an unknown track.
 
-**Consistency over creativity.** If a vocabulary-hint section appears below, prefer reusing those existing tags exactly (same spelling, same casing) over inventing near-duplicates. Only coin a new tag when nothing in the existing vocabulary fits.
+**Consistency over creativity.** If a vocabulary-hint section appears below, prefer reusing those existing tags exactly (same spelling, same casing) over inventing near-duplicates. Only coin a new tag when nothing in the existing vocabulary fits. This applies doubly to genres — reuse an existing umbrella before coining a new one.
 
-Use title, artist, BPM, and existing genre tags as signal. Modern dance music (house/techno/EDM) at >124 BPM is usually 7-9 energy. Indie/feelgood pop is 4-6. Ambient/chill is 1-3. Hip-hop varies widely.
+Use title, artist, BPM, and the (granular) input genre tags as signal — but always collapse genres to the broad umbrellas from rule 2. Modern dance music (house/techno/EDM) at >124 BPM is usually 7-9 energy. Indie/feelgood pop is 4-6. Ambient/chill is 1-3. Hip-hop varies widely.
+
+**Plausibility self-check (do this last).** After you have all five values for a track, re-read them together and check they tell a coherent story — the fields are estimated jointly but must not contradict each other. If something doesn't add up, revise the weaker guess before returning. Typical tells: a genre that clashes with the tempo or energy (e.g. a 145-BPM high-energy floor-filler tagged as a slow ballad genre like schlager), moodTags that fight the energyLevel (e.g. "chill" at energy 9), or a genre implied by the artist's reputation that the actual sound contradicts. Trust the concrete musical signals (BPM, energy, the real production style) over surface associations from title/artist. Drop or correct the field that's out of line rather than emitting a contradictory set.
 
 Return one entry per input track, matching uris exactly. Do not invent uris.`;
 

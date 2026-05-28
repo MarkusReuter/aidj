@@ -26,6 +26,20 @@ const TagSchema = z
   .transform((s) => s.trim().toLowerCase())
   .refine((s) => s.length > 0, 'tag must not be blank after trim');
 
+/**
+ * Musikalische Tonart in Camelot-Notation (1-12 + A/B, z.B. "8A", "11B") fürs
+ * Harmonic Mixing. Anders als moodTags wird hier UPPER-cased normalisiert (das
+ * Letter-Suffix ist konventionell groß). Eingabe wird getrimmt + großgeschrieben,
+ * dann gegen das Camelot-Format validiert.
+ */
+const CamelotSchema = z
+  .string()
+  .transform((s) => s.trim().toUpperCase())
+  .refine(
+    (s) => /^(1[0-2]|[1-9])[AB]$/.test(s),
+    'Camelot key must look like "8A" or "11B" (1-12 + A/B)',
+  );
+
 export const LibraryTrackSchema = z.object({
   uri: z.string().regex(/^spotify:track:[A-Za-z0-9]+$/),
   title: z.string().min(1),
@@ -36,6 +50,21 @@ export const LibraryTrackSchema = z.object({
   bpm: z.number().int().min(40).max(220).nullable(),
   moodTags: z.array(TagSchema),
   energyLevel: z.number().int().min(1).max(10).nullable(),
+  /**
+   * Camelot-Tonart fürs Harmonic Mixing (z.B. "8A"). Vom Auto-Tag-LLM geschätzt
+   * (Spotifys audio-features ist seit Nov 2024 für neue Apps dicht) — also eine
+   * Schätzung, kein Messwert. `.default(null)` damit ältere library.json ohne
+   * das Feld weiter parst; der Auto-Tag-Run füllt es nachträglich.
+   */
+  camelotKey: CamelotSchema.nullable().default(null),
+  /**
+   * Namen der Quell-Playlists, aus denen dieser Track in die Library kam.
+   * Free-form Display-Strings (NICHT normalisiert — anders als moodTags/genres,
+   * weil das hier echte Playlist-Titel sind, die der Host wiedererkennen soll),
+   * dedupliziert. `.default([])` damit ältere library.json ohne das Feld weiter
+   * parsen — der Build füllt es nachträglich beim nächsten Import.
+   */
+  playlists: z.array(z.string().min(1)).default([]),
 });
 
 export type LibraryTrack = z.infer<typeof LibraryTrackSchema>;

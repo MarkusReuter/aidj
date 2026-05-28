@@ -27,6 +27,7 @@ import {
 import { loadLibrary, type LibraryTrack } from './library';
 import { MOCK_MOOD_QUESTIONS, type MoodQuestion } from './mock-data';
 import type {
+  FilterNotice,
   SnapshotBrainStatus,
   SnapshotTrack,
   StateSnapshot,
@@ -87,6 +88,10 @@ type InternalState = {
   /** Vom DJ-Brain dynamisch erzeugte Frage, die `moodQuestionIdx` überschreibt. */
   customMoodQuestion: MoodQuestion | null;
   activePlaylists: Set<string>;
+  /** Filter-Modus (Host-Setting, gespiegelt aus settings.json bei jedem Poll). */
+  filterMode: 'playlists' | 'genres';
+  /** Ob BPM angezeigt + vom Brain berücksichtigt wird (Host-Setting, gespiegelt). */
+  bpmEnabled: boolean;
   /** URI des zuletzt gesehenen Tracks — Edge-Detect für Track-Wechsel. */
   lastTrackUri: string | null;
   /** Letzte HISTORY_MAX URIs (neueste zuletzt). */
@@ -99,6 +104,8 @@ type InternalState = {
   buttonLog: ButtonLogEntry[];
   /** Letzter DJ-Brain-Status (Provider + Latenz); für Admin-Badge via SSE. */
   lastBrain: SnapshotBrainStatus | null;
+  /** Filter-Hinweis fürs Tablet, wenn der Pool zu klein war (sonst null). */
+  filterNotice: FilterNotice | null;
 };
 
 /**
@@ -145,12 +152,15 @@ if (!g[GLOBAL_KEY]) {
       tracksUntilMoodSwitch: TRACKS_PER_MOOD_QUESTION,
       customMoodQuestion: null,
       activePlaylists: new Set<string>(),
+      filterMode: 'playlists',
+      bpmEnabled: true,
       lastTrackUri: null,
       history: [],
       playedAt: {},
       partyStartedAt: Date.now(),
       buttonLog: [],
       lastBrain: null,
+      filterNotice: null,
     },
     emitter: newEmitter,
     subscriberCount: 0,
@@ -204,12 +214,36 @@ async function getLibrary(): Promise<LibraryTrack[]> {
 }
 
 /**
- * Wirft Cache weg — wird vom Library-Editor aufgerufen, wenn der Host während
- * der App-Lifetime Tags umschreibt. Für Phase 4 noch nicht verdrahtet, bleibt
- * aber als Hook für Phase 6.
+ * Wirft den In-Memory-Library-Cache weg. Low-Level-Primitive — für „sofort
+ * wirksam ohne Neustart" lieber [refreshLibrary] nutzen, das zusätzlich Cache
+ * neu füllt, Kandidaten neu mischt und an die Clients emittiert.
  */
 export function invalidateLibraryCache(): void {
   stash.libraryCache = null;
+}
+
+/**
+ * Library-Datei hat sich geändert (Editor-Save oder Playlist-Import) → Cache
+ * verwerfen, frisch nachladen und die Kandidaten sofort neu mischen, damit
+ * Änderungen (neue/entfernte Tracks, geänderte Tags/Energy/Key) **ohne
+ * App-Neustart** wirksam werden. Danach emit(), damit Tablet/Phone/Admin den
+ * neuen Stand über SSE bekommen.
+ *
+ * Niemals throwen: ein Fehler beim Recompute darf den auslösenden Save-/Build-
+ * Request nicht killen — die Datei ist ja bereits korrekt geschrieben.
+ */
+export async function refreshLibrary(): Promise<void> {
+  stash.libraryCache = null;
+  try {
+    // Cache explizit neu füllen — recomputeCandidates ruft getLibrary() nur,
+    // wenn Brain-Slots zu füllen sind; computeFilterOptions() braucht den Cache
+    // aber immer (sonst leere Filter-Labels nach dem Refresh).
+    await getLibrary();
+    await recomputeCandidates(state.lastTrackUri);
+  } catch (err) {
+    console.warn('[state] refreshLibrary failed:', err);
+  }
+  emit();
 }
 
 /**
@@ -229,8 +263,12 @@ async function pickCandidatesViaBrain(
   currentUri: string | null,
   count: number,
   extraExcludeUris: string[] = [],
-): Promise<{ candidates: SnapshotTrack[]; reasonings: Record<string, string> }> {
-  if (count <= 0) return { candidates: [], reasonings: {} };
+): Promise<{
+  candidates: SnapshotTrack[];
+  reasonings: Record<string, string>;
+  filterNotice: FilterNotice | null;
+}> {
+  if (count <= 0) return { candidates: [], reasonings: {}, filterNotice: null };
   try {
     const history = state.history.slice(-HISTORY_MAX);
     const augmentedHistory = extraExcludeUris.length > 0
@@ -260,11 +298,75 @@ async function pickCandidatesViaBrain(
       }
     }
 
+    // Aktive Filter (Playlist- ODER Genre-Namen, je nach filterMode) anwenden.
+    // Statt den Filter bei zu kleinem Pool lautlos zu droppen (alt), halten wir
+    // ihn strikt: passende Tracks werden BEVORZUGT (force-include), und nur wenn
+    // es zu wenige gibt, füllen wir den Rest mit Off-Filter-Tracks auf, damit das
+    // Lock-Window nie ohne Kandidaten dasteht. Das Auffüllen wird über
+    // `filterNotice` ans Tablet gemeldet — kein stiller Genre-Mix mehr.
+    let forcedTracks: LibraryTrack[] = [];
+    let filterNotice: FilterNotice | null = null;
+    let brainPool = filteredLibrary;
+    if (state.activePlaylists.size > 0) {
+      const active = state.activePlaylists;
+      const inGenreMode = state.filterMode === 'genres';
+      const matching = filteredLibrary.filter((t) => {
+        const labels = inGenreMode ? t.spotifyGenres : t.playlists;
+        return labels.some((v) => active.has(v));
+      });
+      const label = [...active].join(', ');
+      if (matching.length >= count) {
+        // Genug Treffer → strikt: Brain pickt ausschließlich aus dem Filter-Pool.
+        brainPool = matching;
+      } else {
+        // Zu wenige (inkl. 0): vorhandene Treffer garantiert reinnehmen (außer
+        // dem laufenden Track + History, sonst Dauer-Wiederholung), Rest aus dem
+        // übrigen Pool auffüllen. Notice meldet, wie viele wirklich passten.
+        const exclude = new Set<string>([
+          ...(currentUri ? [currentUri] : []),
+          ...augmentedHistory,
+        ]);
+        forcedTracks = matching
+          .filter((t) => !exclude.has(t.uri))
+          .slice(0, count);
+        const forcedUris = new Set(forcedTracks.map((t) => t.uri));
+        brainPool = filteredLibrary.filter((t) => !forcedUris.has(t.uri));
+        filterNotice = { label, matched: matching.length, requested: count };
+      }
+    }
+
+    const forcedCandidates: SnapshotTrack[] = forcedTracks.map((t) => ({
+      ...libraryToSnapshotTrack(t),
+      source: 'brain' as const,
+    }));
+    const reasonings: Record<string, string> = {};
+    for (const t of forcedTracks) {
+      reasonings[t.uri] = `filter-match: ${[...state.activePlaylists].join(', ')}`;
+    }
+
+    const remaining = count - forcedCandidates.length;
+    // remaining <= 0 kann im Force-Pfad praktisch nicht auftreten (matching <
+    // count ⇒ forced < count), aber defensiv: dann den Brain-Call sparen.
+    if (remaining <= 0) {
+      return {
+        candidates: forcedCandidates.slice(0, count),
+        reasonings,
+        filterNotice,
+      };
+    }
+
+    // BPM-Berücksichtigung aus (Host-Setting): BPM aus dem Pool nullen, dann
+    // ignorieren sowohl Heuristik (BPM-Distanz-Score fällt weg) als auch LLM
+    // (sieht bpm:null) das Tempo komplett.
+    const brainLibrary = state.bpmEnabled
+      ? brainPool
+      : brainPool.map((t) => (t.bpm === null ? t : { ...t, bpm: null }));
+
     const result = await proposeNextCandidates(
       {
-        library: filteredLibrary,
+        library: brainLibrary,
         currentTrackUri: currentUri,
-        history: augmentedHistory,
+        history: [...augmentedHistory, ...forcedTracks.map((t) => t.uri)],
         activePlaylists: [...state.activePlaylists],
         currentMoodQuestion:
           state.customMoodQuestion ?? currentMoodQuestion() ?? null,
@@ -274,7 +376,7 @@ async function pickCandidatesViaBrain(
         partyStartedAt: state.partyStartedAt,
       },
       {
-        count,
+        count: remaining,
         tracksSinceRefresh:
           TRACKS_PER_MOOD_QUESTION - state.tracksUntilMoodSwitch,
       },
@@ -293,9 +395,8 @@ async function pickCandidatesViaBrain(
       at: Date.now(),
     };
 
-    const candidates: SnapshotTrack[] = [];
-    const reasonings: Record<string, string> = {};
-    for (const c of result.candidates.slice(0, count)) {
+    const candidates: SnapshotTrack[] = [...forcedCandidates];
+    for (const c of result.candidates.slice(0, remaining)) {
       const t = library.find((x) => x.uri === c.trackUri);
       if (!t) continue;
       const snapshot: SnapshotTrack = {
@@ -305,10 +406,10 @@ async function pickCandidatesViaBrain(
       candidates.push(snapshot);
       reasonings[snapshot.id] = c.reasoning;
     }
-    return { candidates, reasonings };
+    return { candidates: candidates.slice(0, count), reasonings, filterNotice };
   } catch (err) {
     console.warn('[state] dj-brain crashed unexpectedly:', err);
-    return { candidates: [], reasonings: {} };
+    return { candidates: [], reasonings: {}, filterNotice: null };
   }
 }
 
@@ -378,6 +479,10 @@ async function recomputeCandidates(currentUri: string | null): Promise<void> {
         );
         brainCandidates = picked.candidates;
         brainReasonings = picked.reasonings;
+        state.filterNotice = picked.filterNotice;
+      } else {
+        // Alle Slots von Gast-Wünschen belegt → Filter spielt keine Rolle.
+        state.filterNotice = null;
       }
       // Bei llmCount === 0: state.lastBrain bleibt stehen (alter Stand der
       // letzten Brain-Antwort), Reasonings für Brain-Slots bleiben leer.
@@ -414,6 +519,25 @@ function currentMoodQuestion(): MoodQuestion | undefined {
   return MOCK_MOOD_QUESTIONS[state.moodQuestionIdx % MOCK_MOOD_QUESTIONS.length];
 }
 
+/**
+ * Leitet die Filter-Labels für den Tablet-/Phone-Button aus der Library ab:
+ * im Playlist-Modus die Vereinigung aller `playlists`, im Genre-Modus die der
+ * `spotifyGenres`. Sortiert + dedupliziert. Liest den Library-Cache synchron —
+ * solange der noch nicht gefüllt ist (vor dem ersten Track-Wechsel), leer.
+ */
+function computeFilterOptions(): string[] {
+  const lib = stash.libraryCache;
+  if (!lib) return [];
+  const inGenreMode = state.filterMode === 'genres';
+  const set = new Set<string>();
+  for (const t of lib) {
+    for (const label of inGenreMode ? t.spotifyGenres : t.playlists) {
+      set.add(label);
+    }
+  }
+  return [...set].sort((a, b) => a.localeCompare(b));
+}
+
 function buildSnapshot(): StateSnapshot {
   const np = state.nowPlaying;
   const mq = currentMoodQuestion();
@@ -439,6 +563,10 @@ function buildSnapshot(): StateSnapshot {
     currentMoodQuestion: mq ?? null,
     moodCounts: { ...state.moodCounts },
     activePlaylists: [...state.activePlaylists],
+    filterMode: state.filterMode,
+    filterOptions: computeFilterOptions(),
+    filterNotice: state.filterNotice,
+    bpmEnabled: state.bpmEnabled,
     guestQueue: listActiveGuests().map((e) => ({
       guestId: e.guestId,
       guestName: e.guestName,
@@ -464,6 +592,17 @@ function emit(): void {
  */
 async function poll(): Promise<void> {
   state.pollAt = Date.now();
+  // Filter-Modus aus den Host-Settings spiegeln (in-memory-cached → billig) und
+  // den Library-Cache warm halten, damit `filterOptions` im Snapshot verfügbar
+  // ist, auch bevor der erste Track-Wechsel den Cache via Brain-Pick füllt.
+  try {
+    const settings = await getSettings();
+    state.filterMode = settings.antiFilterMode;
+    state.bpmEnabled = settings.bpmEnabled;
+    await getLibrary();
+  } catch {
+    // Settings/Library nicht ladbar → Defaults behalten, nicht crashen.
+  }
   try {
     if (!(await isSpotifyConnected())) {
       state.spotifyConnected = false;
@@ -681,7 +820,30 @@ export function togglePlaylist(name: string): void {
   if (state.activePlaylists.has(name)) state.activePlaylists.delete(name);
   else state.activePlaylists.add(name);
   logButton({ type: 'playlist', value: name });
+  // Sofort emitten, damit der Filter-Chip im UI direkt umschaltet, …
   emit();
+  // … dann den Pick auf der neuen Filter-Basis neu mischen (fire-and-forget,
+  // emittet selbst nochmal wenn die neuen Kandidaten da sind). Der nächste
+  // Track-Wechsel würde den Filter sonst erst Minuten später anwenden.
+  void reRankAsync('filter-toggle');
+}
+
+/**
+ * Wendet einen Filter-Modus-Wechsel (Host-Setting) an: spiegelt den Modus in
+ * den State, leert die aktiven Filter (Playlist- vs Genre-Labels sind
+ * verschiedene Wertebereiche, alte Auswahl wäre sinnlos) und pusht ein
+ * SSE-Update, damit Tablet/Phone sofort die neue Label-Liste zeigen. Wird vom
+ * Settings-PUT-Endpoint aufgerufen.
+ */
+export function applyFilterMode(mode: 'playlists' | 'genres'): void {
+  const changed = state.filterMode !== mode;
+  state.filterMode = mode;
+  if (changed) state.activePlaylists.clear();
+  emit();
+  // Modus-Wechsel leert die aktiven Filter → der Pool ist wieder die ganze
+  // Library. Trotzdem neu mischen, damit ein evtl. aktiver Filter sofort
+  // wegfällt statt erst beim nächsten Track-Wechsel.
+  if (changed) void reRankAsync('filter-mode-switch');
 }
 
 export function commitCandidate(trackId: string): boolean {
@@ -759,9 +921,7 @@ export function recordAntiPress(value: 'dislike' | 'love'): void {
   antiCounts[value] += 1;
   const trackUri = state.lastTrackUri ?? undefined;
   logButton({ type: value, value, trackUri });
-  if (value === 'dislike') {
-    void reRankAsync('dislike');
-  }
+  void reRankAsync(value);
   emit();
 }
 export function getAntiCounts(): Readonly<typeof antiCounts> {

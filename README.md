@@ -4,21 +4,19 @@ Touch-only Tablet-App für Hausparties. Du stellst dem System eine kuratierte Tr
 
 Das hier ist eine **lokal gehostete App** — keine Cloud, kein Account-Service. Du registrierst eine eigene Spotify-Developer-App, der Server läuft auf deinem Rechner, das iPad und die Phones reden über WLAN mit ihm.
 
-## Status
+## Funktionsumfang
 
-Reifegrad: **end-to-end spielbar** — Tablet/Phone zeigen echten Spotify-Track, Tap auf eine Kandidaten-Karte queued ihn wirklich, das LLM-Brain liefert echte DJ-Vorschläge (mit Heuristik-Fallback wenn kein API-Key gesetzt ist).
+Die App ist **end-to-end spielbar**: Tablet/Phone zeigen den echten Spotify-Track, ein Tap auf eine Kandidaten-Karte queued ihn wirklich, das LLM-Brain liefert echte DJ-Vorschläge (mit Heuristik-Fallback, wenn kein API-Key gesetzt ist).
 
-- ✅ Tablet-UI (Landscape, 4 Kandidaten-Karten, Mood-Buttons, Playlist-Toggles, Anti-Buttons)
-- ✅ Phone-UI (Portrait, Track-Suche, Gast-Queue, Hidden-DJ-Mode via 10× Tap aufs Logo)
-- ✅ UA-Routing auf `/` (Phone → `/phone`, sonst → `/tablet`)
-- ✅ Library-Editor + Playlist-Picker + Cooldown-Slider unter `/admin` (Mood-Tags + Genres + Energy manuell taggen oder via LLM auto-taggen mit Live-Progress-Stream, Library additiv aus Spotify-Playlists bauen)
-- ✅ `build-library`-Skript als Power-User-Fallback (Spotify-Playlists → `data/library.json` + BPM via GetSongBPM)
-- ✅ Spotify-OAuth-Flow + API-Proxy (Queue, Now-Playing, Devices, Transfer-Playback, Search)
-- ✅ SSE-Pipeline + Server-State (Multi-Client-Sync, Spotify-Polling, Mood/Playlist serverseitig)
-- ✅ Gast-Queue-Server-State (FIFO + 1-Slot-Quota + Idempotenz + Max-10-pending + 15-min-Pending-Timeout, Phone-Submission via `/api/guest/submit`)
-- ✅ DJ-Brain mit zwei LLM-Providern (Google Gemini **oder** Anthropic Claude) + Heuristik-Fallback bei fehlendem Key, Live-Provider-Badge im `/admin`
-- ✅ Lock-Window 10 s vor Track-Ende (Auto-Pick wird in Spotify-Queue gepusht), echter Skip-Button
-- ✅ History-Post-Mortem unter `/history` (was lief, mit welchen Brain-Reasonings)
+- **Tablet-UI** (Landscape, touch-only): 4 Kandidaten-Karten, Mood-Buttons, Playlist-Toggles, Anti-Buttons (Skip / 👎 / ❤️).
+- **Phone-UI** (Portrait): Track-Suche, Gast-Queue, Hidden-DJ-Mode via 10× Tap aufs Logo. UA-Routing auf `/` schickt Phones nach `/phone`, alles andere nach `/tablet`.
+- **Admin** (`/admin`): Library-Editor, Playlist-Picker und Cooldown-Slider. Tracks manuell oder per LLM auto-taggen (Mood-Tags + Genres + Energy + Camelot-Key, Live-Progress-Stream), Library additiv aus Spotify-Playlists bauen.
+- **DJ-Brain**: zwei LLM-Provider (Google Gemini **oder** Anthropic Claude) mit Heuristik-Fallback bei fehlendem Key, Live-Provider-Badge im `/admin`.
+- **Spotify-Anbindung**: OAuth-Flow + API-Proxy (Queue, Now-Playing, Devices, Transfer-Playback, Search). Lock-Window pusht ~10 s vor Track-Ende den Auto-Pick in die Queue; echter Skip-Button.
+- **Server-State**: SSE-Pipeline mit Multi-Client-Sync, 5-s-Spotify-Polling, server­seitigem Mood/Playlist-State.
+- **Gast-Queue**: FIFO + 1-Slot-Quota + Idempotenz + Max-10-pending + 15-min-Pending-Timeout, Phone-Submission via `/api/guest/submit`.
+- **History** (`/history`): Post-Mortem — was lief, mit welchen Brain-Reasonings.
+- **`build-library`-Skript**: Power-User-Fallback (Spotify-Playlists → `data/library.json` + BPM via GetSongBPM).
 
 Architektur-Details in [CLAUDE.md](./CLAUDE.md) (Repo-Onboarding) und [AGENTS.md](./AGENTS.md) (Next.js-Version-Hinweise).
 
@@ -157,12 +155,14 @@ npm run dev
 # Browser: http://localhost:3000/admin
 ```
 
-Pro Track werden drei Achsen vergeben: **Mood-Tags** (z. B. `warm-up`, `peak`, `banger`, `feelgood`, `melancholic`, `dancefloor`, `chill` — oder eigene Begriffe; alles free-form), **Genres** (z. B. `house`, `techno`, `indie-pop`, `hip-hop`) und **Energy-Level** (1–10). Mood-Tags und Genres sind kein hardcoded Enum — du oder das LLM erfindet das Vokabular selbst, Normalisierung passiert über `trim().toLowerCase()`.
+Pro Track werden vier Achsen vergeben: **Mood-Tags** (z. B. `warm-up`, `peak`, `banger`, `feelgood`, `melancholic`, `dancefloor`, `chill` — oder eigene Begriffe; alles free-form), **Genres** (z. B. `house`, `techno`, `indie-pop`, `hip-hop`), **Energy-Level** (1–10) und der **Camelot-Key** (Tonart in Camelot-Notation wie `8A` oder `11B`). Mood-Tags und Genres sind kein hardcoded Enum — du oder das LLM erfindet das Vokabular selbst, Normalisierung passiert über `trim().toLowerCase()`.
+
+Der **Camelot-Key** ist das Signal fürs **Harmonic Mixing**: das DJ-Brain bevorzugt für den Auto-Pick (Kandidat #1) eine Tonart, die zum laufenden Track harmonisch passt (gleiche Zahl oder ±1 auf dem Camelot-Rad, A↔B), damit der Übergang nicht „aneinander vorbei" klingt. Format ist fix validiert (`<1–12><A|B>`, upper-cased) — kein free-form. Das Auto-Tag-LLM **schätzt** den Key (echte Tonart-Analyse macht die App nicht), du kannst ihn in der Key-Spalte des Editors von Hand korrigieren.
 
 **Zwei Wege:**
 
-- **🪄 Auto-Tag-Button** (im LibraryEditor oben): wenn du Schritt 7 schon erledigt hast (LLM-Key gesetzt), tagged das LLM alle ungetaggten Tracks. Es vergibt **Mood-Tags, Genres und Energy** selbst — bei den Genres ein gefundener Ersatz für Spotifys `/v1/artists` (das im Dev-Mode 403'ed). Der Vocabulary-Hint im Prompt zeigt dem Modell die Top-30 bisher vergebener Tags + Genres, damit es konsistente Begriffe wiederverwendet statt jedes Mal Synonyme zu erfinden. Bei großen Libraries (~2000 Tracks) läuft das Tagging mit Concurrency 10 in ~1–2 min durch; Progress-Bar + Live-Patch siehst du im Editor, Tags erscheinen pro Batch in der Tabelle. Nichts ist persistiert bis du "Speichern" klickst — review + korrigieren möglich.
-- **Manuell**: pro Track Tag-Chips mit dem Text-Input dahinter ergänzen (Enter/Komma fügt hinzu, Backspace im leeren Feld entfernt den letzten), Genre-Spalte funktioniert analog, Slider für Energy.
+- **🪄 Auto-Tag-Button** (im LibraryEditor oben): wenn du Schritt 7 schon erledigt hast (LLM-Key gesetzt), tagged das LLM alle ungetaggten Tracks. Es vergibt **Mood-Tags, Genres, Energy und Camelot-Key** selbst und schätzt zusätzlich die **BPM** (nur als Lückenfüller — ein echter GetSongBPM-Wert aus dem Library-Build hat Vorrang und wird nicht überschrieben). Bei den Genres ist das LLM ein gefundener Ersatz für Spotifys `/v1/artists` (das im Dev-Mode 403'ed). Der Vocabulary-Hint im Prompt zeigt dem Modell die Top-30 bisher vergebener Tags + Genres, damit es konsistente Begriffe wiederverwendet statt jedes Mal Synonyme zu erfinden. Bei großen Libraries (~2000 Tracks) läuft das Tagging mit Concurrency 10 in ~1–2 min durch; Progress-Bar + Live-Patch siehst du im Editor, Tags erscheinen pro Batch in der Tabelle. Nichts ist persistiert bis du "Speichern" klickst — review + korrigieren möglich.
+- **Manuell**: pro Track Tag-Chips mit dem Text-Input dahinter ergänzen (Enter/Komma fügt hinzu, Backspace im leeren Feld entfernt den letzten), Genre-Spalte funktioniert analog, Slider für Energy, Key-Spalte für den Camelot-Key.
 
 Tagging spart dir nicht extrem viel — der LLM kommt auch ohne Tags klar (er nutzt dann Titel + Artist + BPM als Backup) — aber gibt ihm zusätzliches Signal für sauberere Übergänge und macht den Heuristik-Fallback (ohne LLM-Key) erst wirklich brauchbar.
 

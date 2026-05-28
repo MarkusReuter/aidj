@@ -198,7 +198,7 @@ export const MOCK_TRACKS: Track[] = [
 export const MOCK_MOOD_QUESTIONS: MoodQuestion[] = [
   {
     id: "vibe",
-    question: "Wie ist die Vibe gerade?",
+    question: "Wie ist der Vibe gerade?",
     options: [
       { emoji: "🥱", label: "Müde", value: "tired" },
       { emoji: "👌", label: "Geht", value: "okay" },

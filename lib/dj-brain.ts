@@ -2,7 +2,8 @@
  * DJ-Brain (Phase 5).
  *
  * `proposeNextCandidates()` ist die einzige öffentliche Funktion. Sie liefert
- * 3–4 Track-Kandidaten + optional eine neue Mood-Frage zurück. Caller (state.ts)
+ * genau `count` Track-Kandidaten (default 4) + optional eine neue Mood-Frage
+ * zurück. Das LLM-Schema wird per Call auf `count` festgezogen. Caller (state.ts)
  * weiß nicht, ob die Antwort vom LLM oder vom Heuristik-Fallback kommt — beide
  * haben dieselbe Output-Form.
  *
@@ -83,50 +84,66 @@ export type BrainInput = {
 // Schema fürs LLM-Output.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const CandidatesSchema = z.object({
-  candidates: z
-    .array(
-      z.object({
-        trackUri: z.string(),
-        reasoning: z.string(),
-      }),
-    )
-    .min(3)
-    .max(4),
-  shouldRefreshMoodQuestion: z.boolean(),
-  newMoodQuestion: z
-    .object({
-      question: z.string(),
-      options: z
-        .array(
-          z.object({
-            emoji: z.string(),
-            label: z.string(),
-            value: z.string(),
-          }),
-        )
-        .min(3)
-        .max(6),
-    })
-    .nullable()
-    .optional(),
-});
+/**
+ * Schema wird pro Call mit der gewünschten Kandidatenzahl gebaut: `.length(count)`
+ * erzwingt exakt so viele Picks (statt 3–4 frei), damit das UI verlässlich die
+ * volle Kartenzahl bekommt. Caller (state.ts) passt `count` an, wenn Gast-Wünsche
+ * bereits Slots belegen.
+ */
+function buildCandidatesSchema(count: number) {
+  return z.object({
+    candidates: z
+      .array(
+        z.object({
+          trackUri: z.string(),
+          reasoning: z.string(),
+        }),
+      )
+      .length(count),
+    shouldRefreshMoodQuestion: z.boolean(),
+    newMoodQuestion: z
+      .object({
+        question: z.string(),
+        options: z
+          .array(
+            z.object({
+              emoji: z.string(),
+              label: z.string(),
+              value: z.string(),
+            }),
+          )
+          .min(3)
+          .max(6),
+      })
+      .nullable()
+      .optional(),
+  });
+}
 
-const DJ_INSTRUCTIONS = `You are an expert party DJ. Propose 3-4 tracks from the library that would each work well as the next song.
-Order them by your confidence (first = strongest pick, used as auto-fallback if the crowd doesn't choose).
-The candidates should be DIVERSE — different vibes / BPMs / sub-genres — so the crowd has a real choice, not 4 near-duplicates.
+function djInstructions(count: number): string {
+  return `You are an expert party DJ. Propose EXACTLY ${count} tracks from the library that would each work well as the next song.
+
+Ordering doubles as DJ transition planning:
+- Candidate #1 is the AUTO-PICK — it plays automatically if the crowd doesn't choose, so it must be the SMOOTHEST transition from the current track: minimal BPM jump (ideally ±6, hard max ±12 unless a deliberate energy break), HARMONICALLY COMPATIBLE key (see below), energyLevel within ±1, and at least one shared mood tag or genre so even a hard cut feels mixed.
+- Candidates #2..${count} are the crowd's real CHOICE — keep them DIVERSE (different vibes / BPMs / sub-genres), but still plausible as a next track: avoid energy cliffs (no jump >2 energy levels from the current track).
+
+Harmonic mixing (Camelot keys, field \`key\`, e.g. "8A"=number+letter):
+- A key is COMPATIBLE with the current key when it is: the SAME key, the SAME number with the other letter (relative major/minor, e.g. 8A↔8B), or ±1 on the number with the SAME letter (wraps 12↔1, e.g. 8A↔7A/9A).
+- Strongly prefer a harmonically compatible key for candidate #1. For #2..N it's a tie-breaker, not a hard rule.
+- Many tracks have \`key: null\` (unknown) — then just ignore the key and rely on BPM/energy/mood. Never refuse to pick a track only because its key is null.
 
 Constraints:
 - Pick only tracks whose \`uri\` appears in the LIBRARY block. Do not invent URIs.
 - Avoid tracks played in the last 10 tracks (in history).
-- BPM transition: prefer ±10 BPM from current track when it has BPM; allow deliberate breaks for energy shifts.
+- The current track's BPM / key / energy / mood are given below — plan every transition relative to them.
 - Respect active playlist filters as semantic hints (e.g. "Peak Time" → high energy). Library moodTags + energyLevel are the source of truth.
 - Negative signals (recent 👎 on tracks with overlapping tags) should de-rank similar tracks.
 - Positive signals (recent ❤️) should boost similar tracks.
 
 If the crowd mood has shifted significantly or the current mood question feels stale (4+ tracks since last refresh), set \`shouldRefreshMoodQuestion: true\` and propose a new \`newMoodQuestion\` with 4-6 options that match the current vibe (e.g. "Energie hoch oder runter?" with energy-related options).
 
-Return your reasoning per candidate concisely — that's for logging, not for the UI.`;
+Return your reasoning per candidate concisely and name the transition (e.g. "128→126 BPM, energy 7→7, shared 'peak'") — that's for logging, not for the UI.`;
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Library-Subset fürs Prompt: kompakt, nur was der LLM braucht.
@@ -137,6 +154,7 @@ type LibraryPromptEntry = {
   title: string;
   artist: string;
   bpm: number | null;
+  key: string | null;
   moodTags: string[];
   energyLevel: number | null;
   genres: string[];
@@ -148,6 +166,7 @@ function libraryForPrompt(lib: LibraryTrack[]): LibraryPromptEntry[] {
     title: t.title,
     artist: t.artist,
     bpm: t.bpm,
+    key: t.camelotKey,
     moodTags: t.moodTags,
     energyLevel: t.energyLevel,
     genres: t.spotifyGenres,
@@ -158,7 +177,7 @@ function libraryForPrompt(lib: LibraryTrack[]): LibraryPromptEntry[] {
 // LLM-Call.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function callLLM(input: BrainInput): Promise<BrainResult | null> {
+async function callLLM(input: BrainInput, count: number): Promise<BrainResult | null> {
   const choice = pickModel();
   if (!choice) return null;
 
@@ -179,6 +198,14 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
           text: `LIBRARY:\n${JSON.stringify(libraryForPrompt(input.library))}`,
         };
 
+  // Current-Track-Profil explizit auflösen, damit das LLM Übergänge direkt
+  // relativ zu BPM/Energy/Mood planen kann statt es im LIBRARY-Block zu suchen.
+  const current =
+    input.library.find((t) => t.uri === input.currentTrackUri) ?? null;
+  const currentProfile = current
+    ? `${current.title} — ${current.artist} | bpm=${current.bpm ?? '?'} key=${current.camelotKey ?? '?'} energy=${current.energyLevel ?? '?'} mood=[${current.moodTags.join(', ')}] genres=[${current.spotifyGenres.join(', ')}]`
+    : 'unknown (not in library)';
+
   const messages = [
     {
       role: 'user' as const,
@@ -188,6 +215,7 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
           type: 'text' as const,
           text:
             `Currently playing: ${input.currentTrackUri ?? 'nothing'}\n` +
+            `Current track profile (plan transitions from this): ${currentProfile}\n` +
             `History (last 10): ${JSON.stringify(input.history)}\n` +
             `Active playlist filters: ${input.activePlaylists.join(', ') || 'none'}\n` +
             `Current mood question + counts: ${JSON.stringify({
@@ -202,10 +230,12 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
     },
   ];
 
+  const instructions = djInstructions(count);
+
   console.log(
     '[dj-brain] →',
     JSON.stringify(
-      { provider: choice.displayName, system: DJ_INSTRUCTIONS, messages },
+      { provider: choice.displayName, system: instructions, messages },
       null,
       2,
     ),
@@ -215,12 +245,12 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
   try {
     const { object } = await generateObject({
       model: choice.model,
-      schema: CandidatesSchema,
+      schema: buildCandidatesSchema(count),
       // System-Prompt als Top-Level-String (Vercel AI SDK erlaubt für system
       // keine Content-Parts mit providerOptions). Library landet stattdessen
       // als erster User-Block mit cacheControl — Anthropic-Prompt-Caching
       // funktioniert auch über User-Parts.
-      system: DJ_INSTRUCTIONS,
+      system: instructions,
       messages,
     });
 
@@ -231,7 +261,7 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
     // URIs gegen die Library validieren — LLM könnte halluzinieren.
     const libUris = new Set(input.library.map((t) => t.uri));
     const validCandidates = object.candidates.filter((c) => libUris.has(c.trackUri));
-    if (validCandidates.length < 3) {
+    if (validCandidates.length < count) {
       console.warn(
         `[dj-brain] ${choice.displayName} returned ${object.candidates.length} candidates but only ${validCandidates.length} had valid URIs — falling back to heuristic`,
       );
@@ -252,7 +282,7 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
     );
 
     return {
-      candidates: validCandidates.slice(0, 4),
+      candidates: validCandidates.slice(0, count),
       shouldRefreshMoodQuestion: object.shouldRefreshMoodQuestion && newMQ !== null,
       newMoodQuestion: newMQ,
       provider: choice.provider,
@@ -272,18 +302,54 @@ async function callLLM(input: BrainInput): Promise<BrainResult | null> {
 // Heuristik-Fallback (kein API-Key oder LLM-Fehler).
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** Parst "8A" → {num:8, letter:'A'}; null bei unbekanntem/ungültigem Key. */
+function parseCamelot(
+  k: string | null,
+): { num: number; letter: 'A' | 'B' } | null {
+  if (!k) return null;
+  const m = /^(\d{1,2})([AB])$/.exec(k.trim().toUpperCase());
+  if (!m) return null;
+  const num = Number(m[1]);
+  if (num < 1 || num > 12) return null;
+  return { num, letter: m[2] as 'A' | 'B' };
+}
+
+/**
+ * Harmonic-Mixing-Score nach Camelot-Wheel: gleiche Tonart, relative Dur/Moll
+ * (gleiche Zahl, anderer Buchstabe) oder ±1 auf der Zahl bei gleichem Buchstaben
+ * (mit 12↔1-Wrap) gelten als kompatibel. 0 wenn ein Key fehlt — Key ist nur
+ * Bonus, nie Voraussetzung.
+ */
+function camelotCompatScore(a: string | null, b: string | null): number {
+  const pa = parseCamelot(a);
+  const pb = parseCamelot(b);
+  if (!pa || !pb) return 0;
+  if (pa.num === pb.num && pa.letter === pb.letter) return 0.8; // identisch
+  if (pa.num === pb.num) return 0.6; // relative Dur/Moll
+  const diff = Math.abs(pa.num - pb.num);
+  const wrapped = Math.min(diff, 12 - diff);
+  if (wrapped === 1 && pa.letter === pb.letter) return 0.6; // Nachbar auf dem Wheel
+  return 0;
+}
+
 function heuristicCandidates(input: BrainInput, count: number): BrainCandidate[] {
   const historySet = new Set(input.history);
   if (input.currentTrackUri) historySet.add(input.currentTrackUri);
 
-  const currentBpm =
-    input.library.find((t) => t.uri === input.currentTrackUri)?.bpm ?? null;
+  const currentTrack =
+    input.library.find((t) => t.uri === input.currentTrackUri) ?? null;
+  const currentBpm = currentTrack?.bpm ?? null;
+  const currentEnergy = currentTrack?.energyLevel ?? null;
+  const currentTags = currentTrack?.moodTags ?? [];
+  const currentKey = currentTrack?.camelotKey ?? null;
 
   // Pool: alles aus der Library, was nicht gerade gespielt wurde.
   const pool = input.library.filter((t) => !historySet.has(t.uri));
   if (pool.length === 0) return [];
 
-  // Scoring: BPM-Distanz + Dislike-Penalty + Love-Boost. Höher = besser.
+  // Scoring: BPM-Distanz + Energy-/Mood-Kontinuität + Dislike-Penalty + Love-Boost.
+  // Höher = besser. Kontinuitäts-Terme machen den Top-Pick (Auto-Fallback) zum
+  // saubersten Übergang; der Jitter unten streut die restlichen Karten wieder.
   function score(t: LibraryTrack): number {
     let s = 1.0;
     if (currentBpm !== null && t.bpm !== null) {
@@ -291,6 +357,18 @@ function heuristicCandidates(input: BrainInput, count: number): BrainCandidate[]
       // ±10 BPM volle Punkte, dahinter Abfall.
       s += Math.max(0, 1.5 - dist / 10);
     }
+    // Energy-Kontinuität: ±1 Level fast voll, ab ±3 nichts mehr.
+    if (currentEnergy !== null && t.energyLevel !== null) {
+      const ediff = Math.abs(t.energyLevel - currentEnergy);
+      s += Math.max(0, 1.0 - ediff / 3);
+    }
+    // Mood-Kontinuität: geteilte Tags mit dem laufenden Track → weicher Anschluss.
+    if (currentTags.length > 0) {
+      const cont = currentTags.filter((tag) => t.moodTags.includes(tag)).length;
+      s += 0.15 * cont;
+    }
+    // Harmonic Mixing: kompatible Camelot-Tonart → sauberer Übergang.
+    s += camelotCompatScore(currentKey, t.camelotKey);
     // Dislikes überwiegen Love (sonst eskaliert ein Tag in eine Richtung).
     for (const [uri, w] of Object.entries(input.aggregated.dislikedTrackUris)) {
       if (uri === t.uri) s -= 2 * w;
@@ -325,7 +403,10 @@ function heuristicCandidates(input: BrainInput, count: number): BrainCandidate[]
     trackUri: x.t.uri,
     reasoning: `heuristic: bpm-match=${
       currentBpm && x.t.bpm ? Math.abs(x.t.bpm - currentBpm) : 'n/a'
-    } moodTags=${x.t.moodTags.join(',')}`,
+    } key=${currentKey ?? '?'}→${x.t.camelotKey ?? '?'}(compat=${camelotCompatScore(
+      currentKey,
+      x.t.camelotKey,
+    ).toFixed(1)}) moodTags=${x.t.moodTags.join(',')}`,
   }));
 }
 
@@ -358,7 +439,7 @@ export async function proposeNextCandidates(
 
   // 1. Versuche LLM (asynchron, mit Timeout).
   const llm = await Promise.race([
-    callLLM(input),
+    callLLM(input, count),
     new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
   ]);
   if (llm) return llm;

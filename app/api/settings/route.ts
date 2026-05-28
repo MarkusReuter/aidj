@@ -5,6 +5,7 @@ import {
   setSettings,
   type Settings,
 } from '@/lib/settings';
+import { applyFilterMode } from '@/lib/state';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,13 +24,23 @@ export async function PUT(request: Request): Promise<Response> {
       { status: 400 },
     );
   }
-  const parsed = SettingsSchema.safeParse(body);
+  // Partial-Update: Clients schicken nur das Feld, das sie ändern
+  // (CooldownSetting → cooldownMinutes, FilterModeSetting → antiFilterMode).
+  // Wir mergen über den aktuellen Stand, sonst würde ein Single-Field-PUT die
+  // anderen Felder auf ihre Defaults zurücksetzen.
+  const parsed = SettingsSchema.partial().safeParse(body);
   if (!parsed.success) {
     return Response.json(
       { error: 'invalid_settings', issues: z.treeifyError(parsed.error) },
       { status: 422 },
     );
   }
-  const saved = await setSettings(parsed.data);
+  const current = await getSettings();
+  const saved = await setSettings({ ...current, ...parsed.data });
+  // Filter-Modus-Wechsel an den Party-State durchreichen: aktive Filter leeren
+  // (Playlist- vs Genre-Labels sind verschiedene Wertebereiche) + SSE-Push.
+  if (parsed.data.antiFilterMode !== undefined) {
+    applyFilterMode(saved.antiFilterMode);
+  }
   return Response.json(saved satisfies Settings);
 }

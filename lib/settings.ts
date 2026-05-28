@@ -25,6 +25,19 @@ export const SettingsSchema = z.object({
    * kleinen Libraries den Pool leer machen würden.
    */
   cooldownMinutes: z.number().int().min(0).max(720),
+  /**
+   * Was der Tablet-/Phone-"Filter"-Button (ehemals nur "Playlists") anzeigt:
+   * die Quell-Playlists der Library oder die Genres. `.default` damit ältere
+   * settings.json ohne das Feld weiter parsen.
+   */
+  antiFilterMode: z.enum(['playlists', 'genres']).default('playlists'),
+  /**
+   * Ob BPM überhaupt eine Rolle spielt: angezeigt (Kandidaten-Karten) UND vom
+   * DJ-Brain beim Matchen berücksichtigt. Aus, wenn die BPM-Daten unzuverlässig
+   * sind (GetSongBPM-Misses + LLM-Schätzungen) und nur stören. `.default(true)`
+   * für ältere settings.json.
+   */
+  bpmEnabled: z.boolean().default(true),
 });
 
 export type Settings = z.infer<typeof SettingsSchema>;
@@ -32,16 +45,35 @@ export type Settings = z.infer<typeof SettingsSchema>;
 /** Default: 2 h — typische Party-Länge, Tracks fühlen sich frisch an. */
 export const DEFAULT_SETTINGS: Settings = {
   cooldownMinutes: 120,
+  antiFilterMode: 'playlists',
+  bpmEnabled: true,
 };
 
-let cache: Settings | null = null;
+/**
+ * Cache auf `globalThis` statt im Modul-Scope — gleiche Begründung wie der
+ * State-Stash in `lib/state.ts`: Next.js lädt Server-Module im Dev-Mode teils
+ * in mehreren Instanzen (Route-Handler vs. SSE-Stream-Poll). Ein modul-lokales
+ * `let cache` würde dann auseinanderlaufen: ein `setSettings()` in der einen
+ * Instanz aktualisiert deren Cache + Datei, aber der Poll in der anderen
+ * Instanz hat einen eigenen, nie invalidierten Cache und überschreibt die
+ * frische Auswahl Sekunden später wieder mit dem alten Wert. Geteilter Cache
+ * via globalThis schließt das. Production (`next start`) ist Single-Instance —
+ * der Indirect kostet dort nichts.
+ */
+type SettingsStash = { cache: Settings | null };
+const SETTINGS_GLOBAL_KEY = '__aidj_settings_cache__';
+const sg = globalThis as typeof globalThis & {
+  [SETTINGS_GLOBAL_KEY]?: SettingsStash;
+};
+if (!sg[SETTINGS_GLOBAL_KEY]) sg[SETTINGS_GLOBAL_KEY] = { cache: null };
+const settingsStash = sg[SETTINGS_GLOBAL_KEY]!;
 
 export async function getSettings(): Promise<Settings> {
-  if (cache) return cache;
+  if (settingsStash.cache) return settingsStash.cache;
   try {
     const raw = await readFile(SETTINGS_PATH, 'utf8');
     const parsed = SettingsSchema.safeParse(JSON.parse(raw));
-    cache = parsed.success ? parsed.data : { ...DEFAULT_SETTINGS };
+    settingsStash.cache = parsed.success ? parsed.data : { ...DEFAULT_SETTINGS };
   } catch (err: unknown) {
     if (
       err &&
@@ -49,14 +81,14 @@ export async function getSettings(): Promise<Settings> {
       'code' in err &&
       (err as { code: string }).code === 'ENOENT'
     ) {
-      cache = { ...DEFAULT_SETTINGS };
+      settingsStash.cache = { ...DEFAULT_SETTINGS };
     } else {
       // Korrupte Datei o. ä. → Default + Warnung, nicht crashen.
       console.warn('[settings] failed to load, using defaults:', err);
-      cache = { ...DEFAULT_SETTINGS };
+      settingsStash.cache = { ...DEFAULT_SETTINGS };
     }
   }
-  return cache;
+  return settingsStash.cache;
 }
 
 export async function setSettings(next: Settings): Promise<Settings> {
@@ -71,6 +103,6 @@ export async function setSettings(next: Settings): Promise<Settings> {
   } catch {
     // Windows ignoriert chmod still.
   }
-  cache = validated;
+  settingsStash.cache = validated;
   return validated;
 }

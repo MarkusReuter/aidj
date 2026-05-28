@@ -2,7 +2,6 @@
 
 import { useCallback, useMemo, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { MOCK_PLAYLISTS } from '@/lib/mock-data';
 import { useServerState } from '@/lib/use-server-state';
 import { useDjMode } from '@/lib/phone/dj-mode';
 import { useGuestId } from '@/lib/phone/guest-id';
@@ -57,6 +56,9 @@ export default function PhonePage() {
     progressMs,
     moodCounts,
     activePlaylists,
+    filterMode,
+    filterOptions,
+    bpmEnabled,
     currentQuestion,
     autoPickInSec,
     toast,
@@ -179,6 +181,7 @@ export default function PhonePage() {
         committedId={committedId}
         autoPickInSec={autoPickInSec}
         onTap={mySubmission ? () => {} : onCandidateTap}
+        showBpm={bpmEnabled}
       />
 
       <SearchAutocomplete
@@ -207,15 +210,17 @@ export default function PhonePage() {
             onLove={onLove}
             onOpenPlaylists={() => setPlaylistModalOpen(true)}
             activePlaylistCount={activePlaylists.size}
+            filterMode={filterMode}
             toast={toast}
           />
         </>
       )}
     </main>
     <PlaylistModal
-      playlists={MOCK_PLAYLISTS}
+      playlists={filterOptions}
       active={activePlaylists}
       onToggle={onPlaylistToggle}
+      mode={filterMode}
       open={playlistModalOpen}
       onClose={() => setPlaylistModalOpen(false)}
     />
